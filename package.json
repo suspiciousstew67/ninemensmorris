@@ -1,6 +1,6 @@
 {
   "name": "@meaturious/modified-ninemensmorris",
-  "version": "2.2.4", 
+  "version": "2.2.4",
   "description": "A desktop version of the Nine Men's Morris game.",
   "main": "main.js",
   "scripts": {
@@ -22,11 +22,6 @@
   "build": {
     "appId": "com.meaturious.ninemensmorris",
     "productName": "Nine Men's Morris",
-    "publish": {
-      "provider": "github",
-      "owner": "Meaturious",
-      "repo": "modified-ninemensmorris"
-    },
     "files": [
       "main.js",
       "index.html",
