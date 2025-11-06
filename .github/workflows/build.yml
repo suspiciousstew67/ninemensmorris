@@ -1,45 +1,57 @@
 # .github/workflows/build.yml
 
-name: Build macOS App
+name: Build and Release macOS App
 
-# This tells GitHub to run the workflow automatically
-# every time you push code to your "main" branch.
+# --- CHANGE 1: TRIGGER ---
+# Instead of running on every push to 'main', this workflow now runs ONLY
+# when you push a new tag that starts with 'v' (e.g., v1.0.0, v1.2.1).
+# This is the standard practice for triggering release builds.
 on:
   push:
-    branches:
-      - main
+    tags:
+      - 'v*'
 
 jobs:
-  build:
-    # This job will run on a virtual machine running the latest macOS.
-    # This is required to build a .dmg file.
+  build-and-release: # Renamed job for clarity
     runs-on: macos-latest
 
+    # --- CHANGE 2: PERMISSIONS ---
+    # We need to grant the workflow permission to create a GitHub Release
+    # and upload the built .dmg file as an asset to that release.
+    permissions:
+      contents: write
+
     steps:
-      # Step 1: Checks out your repository's code onto the runner
+      # Step 1: No changes here
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # Step 2: Sets up Node.js so we can use npm commands
+      # Step 2: No changes here
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '18' # Use a stable Long-Term Support version of Node.js
-          cache: 'npm'      # This speeds up the 'npm install' step on future runs
+          node-version: '18'
+          cache: 'npm'
 
-      # Step 3: Installs the dependencies from your package.json file
+      # Step 3: Changed to 'npm ci' for faster, more reliable installs in CI environments
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
-      # Step 4: Runs the "build" script from your package.json
-      # This is where electron-builder creates the .dmg file in a 'dist' folder.
+      # Step 4: No functional changes, but added GITHUB_TOKEN for electron-builder
       - name: Build application
         run: npm run build
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # Step 5: Uploads the final .dmg file from the 'dist' folder
-      # so you can download it from the GitHub Actions page.
-      - name: Upload Artifact
-        uses: actions/upload-artifact@v4
+      # --- CHANGE 3: REPLACE UPLOAD ARTIFACT WITH CREATE RELEASE ---
+      # This new step replaces the old 'Upload Artifact'. Instead of creating a temporary
+      # artifact, it will create a permanent, public GitHub Release and upload
+      # your .dmg file there for everyone to download.
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
         with:
-          name: nine-mens-morris-mac-build
-          path: dist/*.dmg
+          # This sets the name of the release to match your tag (e.g., "v1.1.0")
+          name: Release ${{ github.ref_name }}
+          # This finds the .dmg file inside the 'dist' folder and uploads it.
+          files: |
+            dist/*.dmg
