@@ -1,25 +1,21 @@
 {
-  "name": "@meaturious/modifed-ninemensmorris",
-  "version": "2.0.0",
+  "name": "@meaturious/modified-ninemensmorris",
+  "version": "1.6.1",
   "description": "A desktop version of the Nine Men's Morris game.",
-  "homepage": "https://github.com/Meaturious/modified-ninemensmorris#readme",
-  "bugs": {
-    "url": "https://github.com/Meaturious/modified-ninemensmorris/issues"
-  },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/Meaturious/modified-ninemensmorris.git"
-  },
-  "license": "ISC",
-  "author": "Meaturious",
-  "type": "commonjs",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
     "build": "electron-builder"
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Meaturious/modified-ninemensmorris.git"
+  },
+  "author": "Meaturious",
+  "license": "ISC",
   "dependencies": {
-    "electron-updater": "^6.1.1" 
+    "electron-log": "^5.4.3",
+    "electron-updater": "^6.1.1"
   },
   "devDependencies": {
     "electron": "^25.0.0",
@@ -28,13 +24,11 @@
   "build": {
     "appId": "com.meaturious.ninemensmorris",
     "productName": "Nine Men's Morris",
-    "publish": [
-      {
-        "provider": "github",
-        "owner": "Meaturious",
-        "repo": "modified-ninemensmorris"
-      }
-    ],
+    "publish": {
+      "provider": "github",
+      "owner": "Meaturious",
+      "repo": "modified-ninemensmorris"
+    },
     "files": [
       "main.js",
       "index.html",

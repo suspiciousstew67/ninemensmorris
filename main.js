@@ -2,11 +2,16 @@
 
 const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
-// Import the autoUpdater
 const { autoUpdater } = require('electron-updater');
+const log = require('electron-log'); // Import electron-log
 
-// Keep a global reference to the window object, if you don't, the window will
-// be closed automatically when the JavaScript object is garbage collected.
+// --- AUTO-UPDATE LOGGING SETUP ---
+// This configures electron-log to catch errors and log update progress.
+autoUpdater.logger = log;
+autoUpdater.logger.transports.file.level = 'info';
+log.info('App starting...');
+// --- END LOGGING SETUP ---
+
 let mainWindow;
 
 function createWindow() {
@@ -17,7 +22,6 @@ function createWindow() {
     backgroundColor: '#2e3440',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
-      // Keep these for ipcRenderer to work
       nodeIntegration: false,
       contextIsolation: true,
     }
@@ -25,42 +29,47 @@ function createWindow() {
 
   mainWindow.loadFile('index.html');
 
-  // --- AUTO-UPDATE LOGIC ---
-  // This will immediately check for an update and notify the user if one is available.
   mainWindow.once('ready-to-show', () => {
+    log.info('Main window is ready. Checking for updates.');
     autoUpdater.checkForUpdatesAndNotify();
   });
 }
 
-app.whenReady().then(() => {
-  createWindow();
+app.whenReady().then(createWindow);
 
-  app.on('activate', function () {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
-    }
-  });
+app.on('activate', function () {
+  if (BrowserWindow.getAllWindows().length === 0) createWindow();
 });
 
 app.on('window-all-closed', function () {
-  if (process.platform !== 'darwin') {
-    app.quit();
-  }
+  if (process.platform !== 'darwin') app.quit();
 });
 
-// --- AUTO-UPDATE EVENT LISTENERS (for more detailed UI feedback) ---
+// --- AUTO-UPDATE EVENT LISTENERS ---
 
-// This event is emitted when a new update is found.
-autoUpdater.on('update-available', () => {
+autoUpdater.on('update-available', (info) => {
+  log.info('Update available.', info);
   mainWindow.webContents.send('update_available');
 });
 
-// This event is emitted when an update has been downloaded.
-autoUpdater.on('update-downloaded', () => {
+autoUpdater.on('update-not-available', (info) => {
+  log.info('Update not available.', info);
+});
+
+autoUpdater.on('download-progress', (progressObj) => {
+  let log_message = `Download speed: ${progressObj.bytesPerSecond} - Downloaded ${progressObj.percent}% (${progressObj.transferred}/${progressObj.total})`;
+  log.info(log_message);
+});
+
+autoUpdater.on('update-downloaded', (info) => {
+  log.info('Update downloaded.', info);
   mainWindow.webContents.send('update_downloaded');
 });
 
-// When the user clicks "Restart" in the renderer process, this event is triggered.
+autoUpdater.on('error', (err) => {
+  log.error('Error in auto-updater. ' + err.toString());
+});
+
 ipcMain.on('restart_app', () => {
   autoUpdater.quitAndInstall();
 });
