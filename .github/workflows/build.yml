@@ -1,57 +1,71 @@
 # .github/workflows/build.yml
 
-name: Build and Release macOS App
+name: Build and Release for macOS & Windows
 
-# --- CHANGE 1: TRIGGER ---
-# Instead of running on every push to 'main', this workflow now runs ONLY
-# when you push a new tag that starts with 'v' (e.g., v1.0.0, v1.2.1).
-# This is the standard practice for triggering release builds.
+# This workflow runs only when you push a tag starting with 'v'
 on:
   push:
     tags:
       - 'v*'
 
 jobs:
-  build-and-release: # Renamed job for clarity
-    runs-on: macos-latest
+  # This "build" job will run twice in parallel: once for macOS and once for Windows
+  build:
+    strategy:
+      matrix:
+        os: [macos-latest, windows-latest] # The build matrix
 
-    # --- CHANGE 2: PERMISSIONS ---
-    # We need to grant the workflow permission to create a GitHub Release
-    # and upload the built .dmg file as an asset to that release.
-    permissions:
-      contents: write
+    runs-on: ${{ matrix.os }} # Run on the OS specified by the matrix
 
     steps:
-      # Step 1: No changes here
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # Step 2: No changes here
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '18'
           cache: 'npm'
 
-      # Step 3: Changed to 'npm ci' for faster, more reliable installs in CI environments
+      # 'npm ci' is faster and more reliable for CI environments than 'npm install'
       - name: Install dependencies
         run: npm ci
 
-      # Step 4: No functional changes, but added GITHUB_TOKEN for electron-builder
+      # This runs the "build" script from your package.json
       - name: Build application
         run: npm run build
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # --- CHANGE 3: REPLACE UPLOAD ARTIFACT WITH CREATE RELEASE ---
-      # This new step replaces the old 'Upload Artifact'. Instead of creating a temporary
-      # artifact, it will create a permanent, public GitHub Release and upload
-      # your .dmg file there for everyone to download.
+      # This creates a temporary artifact for each build (one for mac, one for windows).
+      # The next job will download these to create the final release.
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ matrix.os }} # e.g., 'build-macos-latest', 'build-windows-latest'
+          path: dist/
+
+  # This "release" job will only run after BOTH build jobs have finished successfully.
+  release:
+    runs-on: ubuntu-latest
+    needs: build # This keyword is crucial; it waits for the 'build' job matrix to complete.
+    permissions:
+      contents: write # This permission is required to create a release.
+
+    steps:
+      # Step 1: Download all the artifacts that were uploaded by the build jobs.
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      # Step 2: Create the final GitHub Release and upload all the files.
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          # This sets the name of the release to match your tag (e.g., "v1.1.0")
-          name: Release ${{ github.ref_name }}
-          # This finds the .dmg file inside the 'dist' folder and uploads it.
+          name: Release ${{ github.ref_name }} # e.g., "Release v1.5.0"
+          # This pattern finds all files in all downloaded artifact folders
+          # (e.g., artifacts/build-macos-latest/*.dmg, artifacts/build-windows-latest/*.exe)
+          # and uploads them to the release.
           files: |
-            dist/*.dmg
+            artifacts/**/*
