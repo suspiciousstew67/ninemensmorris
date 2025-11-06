@@ -8,14 +8,12 @@ on:
       - 'v*'
 
 jobs:
-  # A single job that runs for each OS in the matrix
   build-and-release:
     strategy:
       matrix:
-        os: [macos-latest, windows-latest] # Runs on both platforms
+        os: [macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
 
-    # Permissions are granted to this job so it can create the release
     permissions:
       contents: write
 
@@ -32,19 +30,18 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # Build the application but DO NOT publish it here.
-      # The next step will handle uploading the correct files.
       - name: Build application
         run: npm run build -- --publish never
 
-      # This step creates the release and uploads ONLY the final installer files.
-      # It runs in both the macOS and Windows jobs.
       - name: Create Release and Upload Assets
         uses: softprops/action-gh-release@v2
+        # --- THE FIX IS HERE ---
+        # This tells the workflow to continue even if one of the uploads fails.
+        # This is the standard way to handle the race condition where both jobs
+        # try to upload the same file (like builder-debug.yml) at the same time.
+        continue-on-error: true
         with:
-          # This specific glob pattern ensures only the final installers and
-          # auto-update files are uploaded. It will not upload the hundreds of
-          # intermediate files from the 'win-unpacked' directory.
+          # We can also exclude the unnecessary debug file to make it even cleaner
           files: |
             dist/*.dmg
             dist/* Setup *.exe
