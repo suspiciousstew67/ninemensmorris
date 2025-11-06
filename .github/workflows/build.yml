@@ -1,6 +1,6 @@
 # .github/workflows/build.yml
 
-name: Build and Release for macOS & Windows
+name: Build and Release
 
 on:
   push:
@@ -8,53 +8,44 @@ on:
       - 'v*'
 
 jobs:
-  build:
+  # A single job that runs for each OS in the matrix
+  build-and-release:
     strategy:
       matrix:
-        os: [macos-latest, windows-latest]
+        os: [macos-latest, windows-latest] # Runs on both platforms
     runs-on: ${{ matrix.os }}
+
+    # Permissions are granted to this job so it can create the release
+    permissions:
+      contents: write
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '18'
           cache: 'npm'
+
       - name: Install dependencies
         run: npm ci
+
+      # Build the application but DO NOT publish it here.
+      # The next step will handle uploading the correct files.
       - name: Build application
         run: npm run build -- --publish never
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # --- THE FIX IS HERE ---
-      - name: Upload Artifact
-        uses: actions/upload-artifact@v4
+      # This step creates the release and uploads ONLY the final installer files.
+      # It runs in both the macOS and Windows jobs.
+      - name: Create Release and Upload Assets
+        uses: softprops/action-gh-release@v2
         with:
-          name: build-${{ matrix.os }}
-          # FIX: Be very specific about which files to upload.
-          # This pattern prevents the contents of 'win-unpacked' from being included.
-          path: |
+          # This specific glob pattern ensures only the final installers and
+          # auto-update files are uploaded. It will not upload the hundreds of
+          # intermediate files from the 'win-unpacked' directory.
+          files: |
             dist/*.dmg
             dist/* Setup *.exe
             dist/*.yml
-
-  release:
-    runs-on: ubuntu-latest
-    needs: build
-    permissions:
-      contents: write
-    steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts/
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          name: Release ${{ github.ref_name }}
-          # This part is now correct because the artifacts it downloads are clean.
-          files: |
-            artifacts/**/*
