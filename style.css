@@ -1,422 +1,248 @@
-/* --- FIX: Removed animated gradient from body for performance --- */
-/* A constantly animating background forces the CPU/GPU to redraw the entire window on every frame.
-   A static gradient provides the same look with almost zero performance cost. */
-.title-bar {
-  /* This is the key property that tells Electron this region is draggable. */
-  -webkit-app-region: drag;
-
-  /* Position the bar at the very top of the window. */
-  position: fixed;
-  top: 0;
-  left: 0;
-
-  /* Make it span the full width. */
-  width: 100%;
-
-  /* Give it a height. 40px is usually enough for the macOS traffic lights. */
-  height: 40px;
+/* --- GLOBAL STYLES & NEW THEME --- */
+:root {
+    --bg-color: #1a1a1a;
+    --panel-color: #2c2c2c;
+    --border-color: #444;
+    --text-color: #e0e0e0;
+    --text-muted: #888;
+    --player1-color: #e67e22; /* Warm Orange */
+    --player2-color: #3498db; /* Cool Blue */
+    --accent-color: #9b59b6; /* Purple for highlights */
+    --font-family: 'Poppins', system-ui, -apple-system, sans-serif;
 }
+
 body {
-    /* This adds space at the top of your body, matching the title bar's height. */
-    padding-top: 40px;
-    font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
-    background: linear-gradient(-45deg, #ee7752, #e73c7e, #23a6d5, #23d5ab);
-    /* background-size and animation properties removed */
-    color: black;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    min-height: 100vh;
+    font-family: var(--font-family);
+    background-color: var(--bg-color);
+    color: var(--text-color);
     margin: 0;
     padding: 20px;
     box-sizing: border-box;
-    overflow: hidden; /* --- FIX: Prevents scrollbars from appearing due to confetti --- */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    padding-top: 40px; /* Space for title bar */
 }
 
-/* The @keyframes gradient-shift is no longer needed and can be deleted. */
-
-/* Main game container with glassmorphism effect */
-.game-container {
-    background: rgb(227, 227, 227);
-    /* --- FIX: Removed backdrop-filter, which is very GPU-intensive --- */
-    border-radius: 20px;
-    padding: 30px;
-    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
-    text-align: center;
-    max-width: 650px;
+.title-bar {
+    -webkit-app-region: drag;
+    position: fixed;
+    top: 0;
+    left: 0;
     width: 100%;
+    height: 40px;
+    z-index: 1000;
 }
 
-/* Game title styling */
-.game-title {
-    font-size: 2rem;
-    font-weight: bold;
-    margin-bottom: 10px;
-    color: black;
+/* --- UPDATED TWO-COLUMN LAYOUT --- */
+.main-layout {
+    display: grid;
+    /* CHANGE: Give more space (75%) to the game panel */
+    grid-template-columns: 3fr 1fr;
+    gap: 40px;
+    width: 100%;
+    /* CHANGE: Allow the whole layout to be larger */
+    max-width: 1400px;
+    align-items: center;
 }
 
-/* Game mode selector - compact slider design */
-.game-mode-selector {
-    margin: 1px 0;
+.game-panel {
     display: flex;
     justify-content: center;
     align-items: center;
 }
 
-.mode-slider-container {
-    background: rgba(59, 59, 59, 0.58);
-    border-radius: 25px;
-    padding: 4px;
+.info-panel {
     display: flex;
-    position: relative;
-    border: 1px solid rgba(255, 255, 255, 0.3);
+    flex-direction: column;
+    gap: 20px;
+    background-color: var(--panel-color);
+    border-radius: 16px;
+    padding: 30px;
+    border: 1px solid var(--border-color);
+    /* NEW: Prevent info panel from becoming too narrow */
+    min-width: 300px;
 }
 
-.mode-button {
-    background: transparent;
-    color: white;
-    border: none;
-    padding: 8px 16px;
-    font-size: 0.85rem;
-    font-weight: 600;
-    border-radius: 20px;
-    cursor: pointer;
-    transition: all 0.3s ease;
-    position: relative;
-    z-index: 2;
-    white-space: nowrap;
-}
-
-.mode-button:hover {
-    color: #fff;
-    text-shadow: 0 0 8px rgba(255, 255, 255, 0.8);
-}
-
-.mode-button.active {
-    background: linear-gradient(145deg, #667eea, #764ba2);
-    color: white;
-    box-shadow: 0 2px 8px rgba(102, 126, 234, 0.4);
-    transform: none;
-}
-
-/* AI thinking indicator */
-.ai-thinking {
-    color: #0033ff;
-    font-weight: bold;
-    font-size: 1rem;
-    opacity: 0;
-    transition: opacity 0.3s ease;
-    margin: 5px 0;
-    height: 1.2em; /* --- FIX: Prevents layout shift when text appears --- */
-}
-
-.ai-thinking.show {
-    opacity: 1;
-}
-
-.thinking-dots {
-    animation: thinking 1.5s infinite;
-}
-
-@keyframes thinking {
-    0%, 20% { opacity: 1; }
-    50% { opacity: 0.3; }
-    80%, 100% { opacity: 1; }
-}
-
-/* Game board container */
+/* --- GAME BOARD LARGER SIZE --- */
 .game-board {
-    position: relative;
-    width: 450px;
-    height: 450px;
-    margin: 30px auto;
-    background: rgb(192, 192, 192);
-    border-radius: 15px;
-    padding: 40px;
-}
-
-/* SVG board styling - takes full container space */
-.board-svg {
     width: 100%;
-    height: 100%;
-    overflow: visible;
+    /* CHANGE: Increased the maximum size of the board */
+    max-width: 700px;
+    aspect-ratio: 1 / 1; /* Keep it square */
 }
 
-/* Board lines (squares and connections) */
-.board-line {
-    stroke: rgb(0, 0, 0);
-    stroke-width: 2;
-    fill: none;
-}
+.board-svg { width: 100%; height: 100%; }
+.board-line { stroke: #666; stroke-width: 2; fill: none; }
 
-/* Basic board position styling (the circles where pieces are placed) */
 .board-position {
-    fill: rgb(227, 227, 227);
-    stroke: rgba(0, 0, 0, 0.8);
+    fill: var(--panel-color);
+    stroke: #777;
     stroke-width: 2;
     cursor: pointer;
     transition: all 0.2s ease;
 }
 
-/* Hover effects for empty positions - enhanced with glow */
 .board-position:hover:not(.occupied) {
-    stroke-width: 3;
-    /* --- FIX: Replaced expensive 'filter' with performant 'box-shadow' --- */
-    /* Note: box-shadow on SVG elements isn't universally supported, but works well here. */
-}
-
-/* Red player hover effect - only applies when it's red's turn and not AI mode */
-body[data-current-player="1"]:not([data-ai-mode="true"]) .board-position:hover:not(.occupied),
-body[data-current-player="1"][data-ai-mode="false"] .board-position:hover:not(.occupied) {
-    fill: #fa2727;
-    stroke: #ee5a52;
-}
-
-/* Blue player hover effect - only applies when it's blue's turn and in 2-player mode */
-body[data-current-player="2"][data-ai-mode="false"] .board-position:hover:not(.occupied) {
-    fill: #0033ff;
-    stroke: #0112ca;
-}
-
-/* Disable hover for AI turns */
-body[data-current-player="2"][data-ai-mode="true"] .board-position {
-    cursor: not-allowed;
-}
-
-/* Occupied position styling for red player */
-.board-position.occupied.player1 {
-    fill: #fa2727;
-    stroke: #ee5a52;
-    stroke-width: 3;
-    cursor: not-allowed;
-}
-
-/* Occupied position styling for blue player */
-.board-position.occupied.player2 {
-    fill: #0033ff;
-    stroke: #0112ca;
-    stroke-width: 3;
-    cursor: not-allowed;
-}
-
-/* Winning positions highlighting with golden glow animation */
-.board-position.winning-position {
-    stroke: #ffd700;
     stroke-width: 4;
-    animation: winner-glow 1s ease-in-out infinite alternate;
 }
 
-/* Golden glow animation for winning positions */
-/* --- FIX: Animating filter is slow. The stroke change is sufficient for a winning effect. --- */
-/* If a glow is still desired, a box-shadow approach is better, but requires more SVG adjustments. */
+.board-position.occupied { cursor: not-allowed; }
+.board-position.occupied.player1 { fill: var(--player1-color); stroke: #d35400; }
+.board-position.occupied.player2 { fill: var(--player2-color); stroke: #2980b9; }
+
+.board-position.winning-position {
+    stroke: var(--accent-color);
+    animation: winner-glow 0.8s infinite alternate;
+}
+
 @keyframes winner-glow {
     from { stroke-width: 4; }
-    to { stroke-width: 6; }
+    to { stroke-width: 8; }
 }
 
-/* Main game info bar container */
-.game-info {
+/* --- INFO PANEL & CONTROLS --- */
+.game-title {
+    font-size: 2rem;
+    font-weight: 700;
+    text-align: center;
+    margin: 0 0 10px 0;
+    color: white;
+}
+
+.players-container { display: flex; flex-direction: column; gap: 15px; }
+
+.player-panel {
+    background-color: #333;
+    padding: 15px 20px;
+    border-radius: 12px;
+    border: 2px solid transparent;
+    transition: all 0.3s ease;
+    opacity: 0.6;
+}
+
+.player-panel.active {
+    opacity: 1;
+    border-color: var(--accent-color);
+    box-shadow: 0 0 15px rgba(155, 89, 182, 0.4);
+}
+
+.player-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin: 13px 0;
-    padding: 10px;
-    border-radius: 50px;
-    transition: all 0.3s ease;
+    margin-bottom: 5px;
 }
 
-/* Red player's turn background */
-.game-info.player1-turn {
-    background: #fa2727;
-}
+.player-name { font-weight: 600; font-size: 1.1rem; }
+.pieces-count { font-size: 0.9rem; color: var(--text-muted); }
 
-/* Blue player's turn background */
-.game-info.player2-turn {
-    background: #0033ff;
-}
-
-/* Game over state with golden gradient background */
-.game-info.game-over {
-    background: linear-gradient(135deg, #ffd700, #ffed4e);
-    animation: celebration 0.6s ease;
-}
-
-/* Celebration animation when game ends */
-@keyframes celebration {
-    0% { transform: scale(0.8); opacity: 0.8; }
-    50% { transform: scale(1.05); }
-    100% { transform: scale(1); opacity: 1; }
-}
-
-/* Player info sections (pill-shaped containers) */
-.player-info {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    font-size: 1.1rem;
-    font-weight: 600;
-    color: white;
-    /* Pill-shaped background for better contrast */
-    background: rgba(0, 0, 0, 0.1);
-    padding: 8px 16px;
-    border-radius: 25px;
-    border: 1px solid rgba(255, 255, 255, 0.3);
-}
-
-/* Player info styling during game over state */
-.game-info.game-over .player-info {
-    color: #1e3c72;
-    background: rgba(30, 60, 114, 0.2);
-    border: 1px solid rgba(30, 60, 114, 0.3);
-}
-
-/* Hidden state for player info (used when game ends) */
-.player-info.hidden {
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity 0.3s ease;
-}
-
-/* Player indicator circles (R and B badges) */
-.player-indicator {
-    width: 30px;
-    height: 30px;
+.turn-indicator {
+    width: 12px;
+    height: 12px;
     border-radius: 50%;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    font-weight: bold;
-    color: white;
-    background: rgba(255, 255, 255, 0.2);
-    border: 2px solid rgba(255, 255, 255, 0.3);
-}
-
-/* Current turn display in center of info bar */
-.current-turn {
-    font-size: 1.1rem;
-    font-weight: bold;
-    margin: 1px 0;
-    padding: 8px 16px;
-    border-radius: 50px;
+    background-color: #555;
     transition: all 0.3s ease;
-    background: rgba(255, 255, 255, 0.2);
-    color: white;
-    border: 2px solid rgba(255, 255, 255, 0.3);
 }
-
-/* Current turn styling during game over (victory message) */
-.game-info.game-over .current-turn {
-    font-size: 1.3rem;
-    color: #1e3c72;
-    background: rgba(30, 60, 114, 0.2);
-    border: 2px solid rgba(30, 60, 114, 0.3);
+.player-panel.active .turn-indicator {
+    background-color: var(--accent-color);
+    box-shadow: 0 0 10px var(--accent-color);
 }
+#player1-panel.active .turn-indicator { background-color: var(--player1-color); box-shadow: 0 0 10px var(--player1-color); }
+#player2-panel.active .turn-indicator { background-color: var(--player2-color); box-shadow: 0 0 10px var(--player2-color); }
 
-
-/* --- FIX: Confetti Styling and Animation --- */
-#confetti-container {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    pointer-events: none;
-    z-index: 1000;
-}
-
-.confetti {
-    position: absolute;
-    width: 10px;
-    height: 10px;
-    background-color: #f0f;
+.ai-thinking {
+    font-size: 0.9rem;
+    color: var(--player2-color);
+    font-weight: 600;
     opacity: 0;
-    will-change: transform, opacity; /* Performance hint for the browser */
+    transition: opacity 0.3s ease;
+    text-align: right;
+    height: 0;
+}
+#player2-panel.thinking .ai-thinking {
+    opacity: 1;
+    height: auto;
+    margin-top: 5px;
 }
 
-.confetti.animate {
-    animation: confetti-fall 3s linear forwards;
+.game-status, .game-over-message {
+    text-align: center;
+    font-weight: 600;
+    min-height: 24px;
 }
 
-@keyframes confetti-fall {
-    0% {
-        transform: translateY(-20px) rotate(0deg);
-        opacity: 1;
-    }
-    100% {
-        transform: translateY(110vh) rotate(720deg);
-        opacity: 0;
-    }
+.game-over-message {
+    font-size: 1.5rem;
+    color: var(--accent-color);
+    animation: fade-in 0.5s ease;
 }
 
+@keyframes fade-in { from { opacity: 0; transform: scale(0.8); } to { opacity: 1; transform: scale(1); } }
 
-/* New Game button styling - positioned at top */
+.controls-group { margin-top: auto; display: flex; flex-direction: column; gap: 15px; }
+
 .reset-button {
-    background: linear-gradient(145deg, #667eea, #764ba2);
+    background-color: var(--accent-color);
     color: white;
     border: none;
-    padding: 12px 24px;
-    font-size: 1.1rem;
-    font-weight: bold;
-    border-radius: 25px;
+    padding: 12px 20px;
+    font-size: 1rem;
+    font-weight: 600;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    width: 100%;
+}
+
+.reset-button:hover { background-color: #8e44ad; }
+
+.game-mode-selector {
+    display: flex;
+    background-color: #333;
+    border-radius: 10px;
+    padding: 4px;
+}
+.mode-button {
+    flex: 1;
+    background: transparent;
+    color: var(--text-muted);
+    border: none;
+    padding: 8px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    border-radius: 7px;
     cursor: pointer;
     transition: all 0.3s ease;
-    margin: 10px 0;
+}
+.mode-button.active {
+    background-color: var(--accent-color);
+    color: white;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.2);
 }
 
-/* New Game button hover effect */
-.reset-button:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 6px 12px rgba(102, 126, 234, 0.4);
+/* --- CONFETTI & RESPONSIVE --- */
+#confetti-container { position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1000; }
+.confetti { position: absolute; width: 10px; height: 10px; background-color: #f0f; opacity: 0; will-change: transform, opacity; }
+.confetti.animate { animation: confetti-fall 3s linear forwards; }
+
+@keyframes confetti-fall {
+    0% { transform: translateY(-20px) rotate(0deg); opacity: 1; }
+    100% { transform: translateY(110vh) rotate(720deg); opacity: 0; }
 }
 
-/* Remove default focus outline from board positions */
-.board-position:focus {
-    outline: none;
-}
-
-/* Mobile responsive design */
-@media (max-width: 768px) {
-    .game-container {
-        padding: 20px;
-        max-width: 90vw;
+/* CHANGE: Adjusted responsive breakpoint for the new wider layout */
+@media (max-width: 1100px) {
+    .main-layout {
+        grid-template-columns: 1fr; /* Stack into a single column */
+        max-width: 600px;
+        gap: 30px;
     }
-    
+    .info-panel {
+        order: -1; /* Move info panel to the top */
+    }
     .game-board {
-        width: 350px;
-        height: 350px;
-        padding: 30px;
+        max-width: 100%;
     }
-    
-    .game-title {
-        font-size: 1.5rem;
-    }
-    
-    .board-position {
-        r: 10; /* Smaller circles on mobile */
-    }
-
-    .game-mode-selector {
-        margin: 10px 0;
-    }
-    
-    .mode-button {
-        padding: 6px 12px;
-        font-size: 0.8rem;
-    }
-
-    /* Stack controls vertically on mobile */
-    .game-controls {
-        flex-direction: column;
-        gap: 15px;
-    }
-}
-
-/* New container for game controls */
-.game-controls {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    gap: 20px;
-    margin: 15px 0;
-    flex-wrap: wrap;
 }
