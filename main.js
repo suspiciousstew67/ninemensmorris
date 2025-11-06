@@ -18,7 +18,9 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
-    titleBarStyle: 'hidden',
+    // Use the 'hidden' title bar style ONLY on macOS.
+    // On Windows and Linux, the default frame will be used, which includes the controls.
+    titleBarStyle: process.platform === 'darwin' ? 'hidden' : 'default',
     backgroundColor: '#2e3440',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
