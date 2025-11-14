@@ -103,6 +103,17 @@ body.light-mode .update-btn-secondary:hover { background: rgba(0, 0, 0, 0.15); }
 body.light-mode .setting-row:hover { background-color: #e9e9ed; }
 .setting-value { color: var(--text-muted); font-weight: 400; }
 
+/* About panel styles inside settings */
+.about-panel { background: transparent; padding: 10px 0 0 0; }
+.about-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.about-content { background: var(--settings-row-bg); padding: 12px; border-radius: 12px; color: var(--text-color); }
+.about-content h3 { margin: 0 0 8px 0; }
+.about-content p { margin: 6px 0; color: var(--text-muted); }
+.about-content a { color: var(--update-btn-primary); text-decoration: none; }
+.debug-box { background: rgba(0,0,0,0.08); border-radius: 8px; padding: 8px; font-family: monospace; font-size: 12px; color: var(--text-muted); max-height: 160px; overflow: auto; white-space: pre-wrap; }
+.about-actions { display: flex; gap: 8px; margin-top: 10px; }
+.about-panel.hidden { display: none; }
+
 /* Confetti */
 #confetti-container { position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 2000; }
 .confetti { position: absolute; width: 10px; height: 10px; opacity: 0; }
@@ -134,3 +145,197 @@ body.light-mode .setting-row:hover { background-color: #e9e9ed; }
 .join-container { display: flex; gap: 8px; }
 #join-ip-input { flex-grow: 1; background-color: var(--control-button-bg); border: 1px solid var(--board-lines-color); color: var(--text-color); border-radius: 8px; padding: 0 12px; font-size: 0.9rem; font-family: var(--font-family); }
 #join-ip-input::placeholder { color: var(--text-muted); }
+
+/* Network Settings Styles */
+#network-actions.hidden { display: none; }
+#host-info-panel.hidden { display: none; }
+
+.host-info-title {
+    text-align: center;
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+}
+.room-code {
+    font-family: monospace;
+    font-size: 2.5rem;
+    font-weight: bold;
+    text-align: center;
+    letter-spacing: 0.2em;
+    padding: 10px;
+    background-color: var(--control-button-bg);
+    border-radius: 8px;
+    color: var(--accent-color);
+    cursor: copy;
+}
+.host-status-text {
+    text-align: center;
+    color: var(--text-muted);
+    font-weight: 500;
+}
+.cancel-btn {
+    background-color: #b91c1c;
+    color: white;
+}
+.cancel-btn:hover {
+    background-color: #991b1b;
+}
+
+/* Name Prompt Modal */
+.name-prompt-panel {
+    background-color: var(--settings-bg);
+    padding: 30px 25px;
+    border-radius: 20px;
+    width: 90%;
+    max-width: 350px;
+    box-sizing: border-box;
+    transform: translateY(100%);
+    transition: transform 0.3s ease-out, background-color 0.3s;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+}
+
+.modal-overlay:not(.hidden) .name-prompt-panel {
+    transform: translateY(0);
+}
+
+/* Generic hidden helper used across the app */
+.hidden { display: none !important; }
+
+.play-again-button { width: auto; min-width: 44px; height: 45px; border-radius: 50px; padding: 6px 12px; background-color: var(--player1-color); color: white; font-weight: 700; font-size: 14px; display: inline-flex; align-items: center; gap: 8px; }
+.play-again-button:hover { background-color: #3a24c1; transform: translateY(-1px); }
+
+.name-prompt-header {
+    text-align: center;
+    margin-bottom: 20px;
+}
+
+.name-prompt-header h2 {
+    margin: 0;
+    font-size: 1.5rem;
+    color: var(--text-color);
+}
+
+.name-prompt-content {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+.name-prompt-subtitle {
+    margin: 0;
+    font-size: 0.95rem;
+    color: var(--text-muted);
+    text-align: center;
+}
+
+.name-prompt-input {
+    background-color: var(--settings-row-bg);
+    border: 2px solid var(--board-lines-color);
+    color: var(--text-color);
+    padding: 12px 15px;
+    border-radius: 10px;
+    font-size: 1rem;
+    font-family: var(--font-family);
+    box-sizing: border-box;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.name-prompt-input:focus {
+    outline: none;
+    border-color: var(--accent-color);
+    box-shadow: 0 0 0 3px rgba(40, 64, 143, 0.1);
+}
+
+body.light-mode .name-prompt-input:focus {
+    box-shadow: 0 0 0 3px rgba(40, 64, 143, 0.15);
+}
+
+.name-prompt-buttons {
+    display: flex;
+    gap: 10px;
+    margin-top: 10px;
+}
+
+.name-prompt-btn {
+    flex: 1;
+    border: none;
+    padding: 12px;
+    border-radius: 10px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color 0.2s, transform 0.1s;
+    font-family: var(--font-family);
+}
+
+.name-prompt-btn:active {
+    transform: scale(0.98);
+}
+
+.name-prompt-btn.confirm-btn {
+    background-color: var(--player1-color);
+    color: white;
+}
+
+.name-prompt-btn.confirm-btn:hover {
+    background-color: #3a24c1;
+}
+
+.name-prompt-btn.cancel-btn {
+    background-color: var(--settings-row-bg);
+    color: var(--text-muted);
+}
+
+.name-prompt-btn.cancel-btn:hover {
+    background-color: #3a3a3c;
+}
+
+body.light-mode .name-prompt-btn.cancel-btn:hover {
+    background-color: #e9e9ed;
+}
+
+/* Ping Indicator */
+.ping-indicator {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin: 12px 0;
+    padding: 12px;
+    background-color: var(--settings-row-bg);
+    border-radius: 8px;
+}
+
+.ping-indicator.hidden {
+    display: none;
+}
+
+.ping-label {
+    font-size: 0.9rem;
+    color: var(--text-muted);
+    font-weight: 500;
+}
+
+#ping-value {
+    color: var(--accent-color);
+    font-weight: 700;
+}
+
+.ping-bar {
+    width: 100%;
+    height: 6px;
+    background-color: var(--control-button-bg);
+    border-radius: 3px;
+    overflow: hidden;
+    border: 1px solid var(--board-lines-color);
+}
+
+.ping-fill {
+    height: 100%;
+    background: linear-gradient(to right, #10b981, #fbbf24, #ef4444);
+    border-radius: 2px;
+    transition: width 0.2s ease;
+}
+
+/* Small ping badge shown inline next to player name */
+/* Inline ping badge and bars removed; settings-panel ping indicator remains */
