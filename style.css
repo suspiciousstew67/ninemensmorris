@@ -37,7 +37,7 @@ html, body { margin: 0; padding: 0; height: 100%; width: 100%; overflow: hidden;
 body { font-family: var(--font-family); background-color: var(--bg-color); color: var(--text-color); display: flex; justify-content: center; align-items: center; }
 
 /* Update Notification Banner */
-.update-notification { position: fixed; top: 0; left: 0; right: 0; background: var(--update-bg); color: white; padding: 12px 15px; z-index: 3000; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3); transform: translateY(-100%); transition: transform 0.3s ease-out, opacity 0.3s ease-out; opacity: 0; -webkit-app-region: no-drag; }
+.update-notification { position: fixed; top: 0; left: 0; right: 0; background: var(--update-bg); color: white; padding: 40px 15px 20px 15px; z-index: 3000; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3); transform: translateY(-100%); transition: transform 0.3s ease-out, opacity 0.3s ease-out; opacity: 0; -webkit-app-region: no-drag; }
 .update-notification.show { transform: translateY(0); opacity: 1; }
 .update-content { display: flex; align-items: center; gap: 12px; max-width: 420px; margin: 0 auto; }
 .update-icon { font-size: 20px; flex-shrink: 0; animation: bounce 2s infinite; }

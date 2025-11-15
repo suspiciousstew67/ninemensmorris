@@ -489,10 +489,6 @@ class NineMensMorrisGame {
             console.error('Error parsing network message:', error);
         }
     }
-    
-    setupWebSocketListeners() {
-        // This method is no longer used - listeners are now set directly in hostGame/joinGame
-    }
 
     makeMove(move) {
         if (move.to === null || move.to === -1 || this.board[move.to] !== null) return;
@@ -867,6 +863,18 @@ class NineMensMorrisGame {
     hideAboutPanel() {
         if (!this.dom.aboutPanel) return;
         this.dom.aboutPanel.classList.add('hidden');
+    }
+
+    // TEST/DEBUG: Simulate update notification for testing
+    testShowUpdateNotification(version = '2.0.0') {
+        this.showUpdateNotification({ version });
+        console.log(`[TEST] Update notification triggered for v${version}`);
+    }
+
+    // TEST/DEBUG: Hide the update notification
+    testHideUpdateNotification() {
+        this.hideUpdateNotification();
+        console.log('[TEST] Update notification hidden');
     }
 
     async copyDebugInfo() {
