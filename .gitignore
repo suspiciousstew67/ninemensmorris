@@ -1,8 +1,59 @@
-# Dependencies
-node_modules
-
-# Build output
-dist
-
-# Mac
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
 .DS_Store
+.atom/
+.history
+.svn/
+
+# IntelliJ related
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# VS Code related
+.vscode/
+
+# Flutter/Dart/Pub
+.dart_tool/
+.packages
+.flutter-plugins
+.flutter-plugins-dependencies
+.metadata
+.pub-cache/
+.pub/
+build/
+
+# Generated files
+lib/generated_plugin_registrant.dart
+flutter_export_environment.sh
+
+# Android related
+**/gradle-wrapper.jar
+**/gradlew
+**/gradlew.bat
+android/.gradle/
+android/captures/
+android/app/**/google-services.json
+android/app/**/GoogleService-Info.plist
+
+# iOS/macOS related
+ios/Flutter/flutter_export_environment.sh
+ios/Flutter/Generated.xcconfig
+macos/Flutter/ephemeral/
+ios/Pods/
+macos/Pods/
+
+# Web related
+web/.dart_tool/
+web/build/
+
+# Coverage
+coverage/
+
+# Exceptions
+!/android/gradlew
+!/android/gradlew.bat
