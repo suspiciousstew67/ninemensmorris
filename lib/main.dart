@@ -12,9 +12,20 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'network_client.dart';
 import 'extreme_ai.dart' as extreme_ai;
+import 'tablebase_loader.dart';
+import 'extreme_simple_wrapper.dart';
+import 'hybrid_ai.dart'; // MCTS + Tablebase hybrid AI
+import 'mcts_ai.dart'; // MCTS configuration
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // Load endgame tablebase for perfect play
+  await tablebaseLoader.load();
+  
+  // Initialize Zobrist hashing for AI
+  extreme_ai.initZobrist();
+  
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
     statusBarColor: Colors.transparent,
     statusBarIconBrightness: Brightness.dark,
@@ -65,11 +76,27 @@ enum GameType { ai, human, network }
 enum Difficulty { easy, medium, hard, extreme }
 enum NetworkRole { none, host, client }
 
+// Configuration: Enable MCTS + Tablebase Hybrid AI
+// Set to true to use Monte Carlo Tree Search with Retrograde Analysis
+const bool USE_MCTS_AI = true; // Change to true to enable MCTS mode
+
+Future<T> _runCompute<T>(FutureOr<T> Function() action) async {
+  // Isolates are unavailable on web; run on main isolate there to avoid runtime errors.
+  if (kIsWeb) return await action();
+  return Isolate.run<T>(action);
+}
+
 extension DifficultyLabel on Difficulty {
   String get label => switch (this) { Difficulty.easy => 'Easy', Difficulty.medium => 'Medium', Difficulty.hard => 'Hard', Difficulty.extreme => 'Extreme' };
   int get searchDepth => switch (this) { Difficulty.easy => 2, Difficulty.medium => 3, Difficulty.hard => 4, Difficulty.extreme => 10 };
-  int get nodeLimit => switch (this) { Difficulty.easy => 8000, Difficulty.medium => 20000, Difficulty.hard => 60000, Difficulty.extreme => 4000000 };
-  int get timeLimitMs => switch (this) { Difficulty.easy => 600, Difficulty.medium => 900, Difficulty.hard => 1300, Difficulty.extreme => 9000 };
+  int get nodeLimit {
+    final limit = switch (this) { Difficulty.easy => 8000, Difficulty.medium => 20000, Difficulty.hard => 60000, Difficulty.extreme => 4000000 };
+    return kIsWeb ? (limit * 0.6).round() : limit;
+  }
+  int get timeLimitMs {
+    final limit = switch (this) { Difficulty.easy => 600, Difficulty.medium => 900, Difficulty.hard => 1300, Difficulty.extreme => 9000 };
+    return kIsWeb ? (limit * 0.6).round() : limit;
+  }
 }
 
 extension GameModeLabel on GameMode {
@@ -319,7 +346,7 @@ class _LegacyMinimaxAI {
       _history.clear();
       _killers.clear();
       // Run heavy search off the UI thread
-      return await Isolate.run<Move?>(() {
+      return await _runCompute<Move?>(() {
         final eng = snapshot.toEngine();
         final ai = _LegacyMinimaxAI(difficulty: difficulty);
         return ai._computeExtremeBitboard(eng, player);
@@ -964,12 +991,13 @@ class BitboardMorris {
       if (oCount == 0 && pCount == 1) singleGapsPlayer++;
       if (pCount == 0 && oCount == 1) singleGapsOpp++;
     }
-    score += (millsPlayer - millsOpp) * 2600;
-    score += (potentialsPlayer - potentialsOpp) * 900;
-    score += (singleGapsPlayer - singleGapsOpp) * 120;
+    // Aggressive weighting: heavily reward forming/setting up mills
+    score += (millsPlayer - millsOpp) * 4200;
+    score += (potentialsPlayer - potentialsOpp) * 1800;
+    score += (singleGapsPlayer - singleGapsOpp) * 300;
 
     final mobility = legalMoves(s, player).length - legalMoves(s, opp).length;
-    score += mobility * 80;
+    score += mobility * 120;
 
     final blockedPlayer = _blockedPieces(s, player, emptyMask);
     final blockedOpp = _blockedPieces(s, opp, emptyMask);
@@ -979,7 +1007,7 @@ class BitboardMorris {
     score += centerDiff * 60;
 
     final doubleThreatDiff = _doubleThreatCount(s, player) - _doubleThreatCount(s, opp);
-    score += doubleThreatDiff * 1400;
+    score += doubleThreatDiff * 2600;
 
     return score;
   }
@@ -988,8 +1016,8 @@ class BitboardMorris {
     double h = 0;
     final next = applyMove(state, move, player);
     final bb = player == 1 ? next.p1 : next.p2;
-    if (_isInMill(move.to!, bb)) h += 3000;
-    if (move.from == null) h += 300;
+    if (_isInMill(move.to!, bb)) h += 6500;
+    if (move.from == null) h += 700;
     // prefer moves that land on opponent threats
     if (move.to != null) {
       final opp = opponent(player);
@@ -997,7 +1025,7 @@ class BitboardMorris {
       for (final m in mills) {
         if (m.contains(move.to)) {
           final oppCount = m.where((p) => (oppBB & (1 << p)) != 0).length;
-          if (oppCount == 2) h += 900; // block opponent ready mill
+          if (oppCount == 2) h += 1600; // block opponent ready mill
         }
       }
     }
@@ -1064,24 +1092,74 @@ class BitboardMorris {
 
 // New production AI wrapper that delegates to extreme_ai.dart.
 class MinimaxAI {
-  MinimaxAI({this.difficulty = Difficulty.hard}) {
+  final Difficulty difficulty;
+  final bool useMCTS;
+  final Function(String)? onStatusUpdate; // Callback for status updates
+  static bool _zobristReady = false;
+  
+  MinimaxAI({
+    required this.difficulty, 
+    this.useMCTS = false,
+    this.onStatusUpdate,
+  }) {
     if (!_zobristReady) {
       extreme_ai.initZobrist();
       _zobristReady = true;
     }
   }
 
-  final Difficulty difficulty;
-  static bool _zobristReady = false;
-
   Future<Move?> chooseMove(GameEngine engine, {required int player}) async {
+    // For Simple mode "Extreme" difficulty, use the same Hybrid/MCTS pipeline as Classic
+    // to mirror the strongest search and heuristics.
+    if (engine.mode == GameMode.simple && difficulty == Difficulty.extreme) {
+      return _chooseMoveWithMCTS(engine, player: player);
+    }
+    
+    // Check if MCTS hybrid AI is enabled
+    if (useMCTS) {
+      return _chooseMoveWithMCTS(engine, player: player);
+    }
+    
+    // Check for Simple mode
+    if (engine.mode == GameMode.simple) {
+      final boardSnapshot = List<int>.from(engine.board);
+      final wLeft = engine.piecesLeft[1];
+      final bLeft = engine.piecesLeft[2];
+      // Simple mode is finite (max 18 plies). Use reasonable depths to avoid exponential slowdown.
+      // Depth 14 is extremely deep.
+      final depth = difficulty == Difficulty.extreme ? 16 :
+                    difficulty == Difficulty.hard ? 10 :
+                    difficulty == Difficulty.medium ? 6 : 2;
+      final maxNodes = difficulty.nodeLimit;
+      final maxMillis = difficulty.timeLimitMs;
+
+      return _runCompute<Move?>(() {
+        final simpleAI = ExtremeSimpleAI(
+          searchDepth: depth,
+          maxNodes: maxNodes,
+          maxMillis: maxMillis,
+        );
+        
+        final bestTo = simpleAI.chooseMove(
+          boardSnapshot,
+          wLeft,
+          bLeft,
+          player,
+        );
+        
+        if (bestTo == null) return null;
+        return Move(from: null, to: bestTo, remove: null);
+      });
+    }
+
+    // Classic mode (existing logic)
     final boardSnapshot = List<int>.from(engine.board);
     final wLeft = engine.piecesLeft[1];
     final bLeft = engine.piecesLeft[2];
     final depth = difficulty.searchDepth;
     final maxNodes = difficulty.nodeLimit;
     final maxMillis = difficulty.timeLimitMs;
-    return Isolate.run<Move?>(() {
+    return _runCompute<Move?>(() {
       final placementsDone = wLeft == 0 && bLeft == 0;
       extreme_ai.setPlacementComplete(placementsDone);
       final pos = _toPosition(boardSnapshot, wLeft, bLeft, player);
@@ -1094,33 +1172,123 @@ class MinimaxAI {
       );
     });
   }
+  
+  /// Choose move using MCTS + Tablebase hybrid AI
+  Future<Move?> _chooseMoveWithMCTS(GameEngine engine, {required int player}) async {
+    final boardSnapshot = List<int>.from(engine.board);
+    final wLeft = engine.piecesLeft[1];
+    final bLeft = engine.piecesLeft[2];
+    final gameMode = engine.mode; // Extract mode before isolate
+    final gamePhase = engine.phase; // Extract phase before isolate
+    final difficultyLevel = difficulty; // Extract difficulty to avoid capturing 'this'
+    final searchBudgetMs = (difficultyLevel.timeLimitMs * 0.9).round();
+    
+    // Run in isolate to prevent UI freeze
+    // We use type inference here because the closure is async (returns Future<Move?>)
+    
+    // Update status to show we are thinking
+    if (onStatusUpdate != null) {
+      final timeEst = difficultyLevel == Difficulty.extreme ? "~9s" : 
+                      difficultyLevel == Difficulty.hard ? "~1.5s" : "<1s";
+      onStatusUpdate!("AI is thinking (${difficultyLevel.label} $timeEst)...");
+    }
+    
+    final search = _runCompute(() async {
+      // Configure MCTS based on difficulty
+      // Much higher iteration counts for stronger play
+      // Reduce significantly for web to prevent UI freeze
+      final bool simpleMode = gameMode == GameMode.simple;
+      final baseIterations = difficultyLevel == Difficulty.extreme
+          ? (simpleMode ? 90000 : 50000)  // push much harder in Simple
+          : difficultyLevel == Difficulty.hard
+              ? 20000
+              : difficultyLevel == Difficulty.medium
+                  ? 10000
+                  : 3000;
+      final iterations = kIsWeb ? (baseIterations * 0.25).round() : baseIterations; // 75% reduction for web
+      
+      final config = HybridConfig(
+        useParallel: !kIsWeb && difficultyLevel == Difficulty.extreme, // Use parallel search for Extreme
+        parallelWorkers: 3, // Limit worker isolates to avoid starving UI thread
+        isSimpleMode: gameMode == GameMode.simple, // Pass game mode
+        mctsConfig: MCTSConfig(
+          maxIterations: iterations,
+          maxMilliseconds: simpleMode && difficultyLevel == Difficulty.extreme
+              ? (searchBudgetMs + 3000) // give simple mode extra time budget
+              : searchBudgetMs,
+          explorationConstant: simpleMode ? 1.5 : 1.8, // bias toward best lines in Simple
+          progressiveWideningFactor: difficultyLevel == Difficulty.extreme
+              ? (simpleMode ? 2.5 : 3.0)
+              : 6.0,
+        ),
+      );
+      
+      final wrapper = HybridAIWrapper(config: config);
+      
+      final phaseInt = gamePhase == GamePhase.placing ? 0 :
+                       gamePhase == GamePhase.moving ? 1 : 2;
+      
+      final result = await wrapper.chooseFullMove(
+        board: boardSnapshot,
+        whitePiecesLeft: wLeft,
+        blackPiecesLeft: bLeft,
+        player: player,
+        phase: phaseInt,
+      );
+      
+      if (result == null) return null;
+      
+      return Move(
+        from: result['from'],
+        to: result['to'],
+        remove: result['remove'],
+      );
+    });
+
+    try {
+      return await search.timeout(Duration(milliseconds: searchBudgetMs + 1200));
+    } on TimeoutException {
+      onStatusUpdate?.call('AI timed out, picking a quick move...');
+      final fallbacks = engine.legalMoves(player);
+      if (fallbacks.isEmpty) return null;
+      final move = fallbacks.first;
+      return Move(from: move.from, to: move.to, remove: move.remove);
+    } catch (e, st) {
+      debugPrint('AI search failed: $e\n$st');
+      return null;
+    }
+  }
+  
+  /// Convert GamePhase to int for MCTS
+  int _getPhase(GamePhase phase) {
+    switch (phase) {
+      case GamePhase.placing:
+        return 0;
+      case GamePhase.moving:
+        return 1;
+      case GamePhase.flying:
+        return 2;
+      case GamePhase.gameOver:
+        return 0; // Should not happen
+    }
+  }
 
   extreme_ai.Position _toPosition(List<int> board, int wLeft, int bLeft, int player) {
-    int white = 0;
-    int black = 0;
-    for (var i = 0; i < board.length; i++) {
-      final v = board[i];
-      if (v == 1) {
-        white |= (1 << i);
-      } else if (v == 2) {
-        black |= (1 << i);
-      }
+    int whiteBits = 0, blackBits = 0;
+    for (int i = 0; i < board.length; i++) {
+      if (board[i] == 1) whiteBits |= (1 << i);
+      if (board[i] == 2) blackBits |= (1 << i);
     }
-    white |= (wLeft << 24);
-    black |= (bLeft << 24);
-    final stm = player == 1 ? 0 : 1; // 0=white,1=black
-    var key = stm == 1 ? extreme_ai.zobristSide : 0;
-    for (var i = 0; i < board.length; i++) {
-      final v = board[i];
-      if (v == 1) {
-        key ^= extreme_ai.zobristPiece[i][0];
-      } else if (v == 2) {
-        key ^= extreme_ai.zobristPiece[i][1];
-      }
+    final stm = player == 1 ? 0 : 1;
+    final white = whiteBits | (wLeft << 24);
+    final black = blackBits | (bLeft << 24);
+    if (!_zobristReady) {
+      extreme_ai.initZobrist();
+      _zobristReady = true;
     }
-    key ^= extreme_ai.zobristPiecesLeft[0][wLeft];
-    key ^= extreme_ai.zobristPiecesLeft[1][bLeft];
-    return extreme_ai.Position(white, black, stm, key);
+    final pos = extreme_ai.Position(white, black, stm, 0);
+    pos.zobristKey = 0;
+    return pos;
   }
 }
 
@@ -1137,7 +1305,7 @@ class MorrisHome extends StatefulWidget {
   State<MorrisHome> createState() => _MorrisHomeState();
 }
 
-class _MorrisHomeState extends State<MorrisHome> with SingleTickerProviderStateMixin {
+class _MorrisHomeState extends State<MorrisHome> with TickerProviderStateMixin {
   static const Duration _pieceAnimDuration = Duration(milliseconds: 230);
   static const Duration _cardAnimDuration = Duration(milliseconds: 320);
   late GameEngine engine;
@@ -1163,8 +1331,7 @@ class _MorrisHomeState extends State<MorrisHome> with SingleTickerProviderStateM
   String? roomCode;
   int pingMs = 0;
   List<_ConfettiParticle> confetti = [];
-  Timer? _confettiTimer;
-  Timer? _confettiTicker;
+  late final AnimationController _confettiAnimation;
   Set<int> millHighlight = {};
   bool showUpdateBanner = false;
   String updateBannerText = 'Update available!';
@@ -1183,21 +1350,41 @@ class _MorrisHomeState extends State<MorrisHome> with SingleTickerProviderStateM
   void initState() {
     super.initState();
     _loaderController = AnimationController(vsync: this, duration: const Duration(seconds: 2));
+    _confettiAnimation = AnimationController(vsync: this, duration: const Duration(seconds: 3))
+      ..addListener(() {
+        if (!mounted) return;
+        setState(() {
+          for (final p in confetti) {
+            p.position += p.velocity;
+            p.velocity += const Offset(0, 0.0008);
+            p.life -= 0.016;
+          }
+          confetti.removeWhere((p) => p.life <= 0.0 || p.position.dy > 1.2);
+          if (confetti.isEmpty && _confettiAnimation.isAnimating) {
+            _confettiAnimation.stop();
+            showConfetti = false;
+          }
+        });
+      });
     darkMode = widget.darkMode;
     engine = GameEngine(mode: mode);
-    ai = MinimaxAI(difficulty: difficulty);
+    ai = MinimaxAI(difficulty: difficulty, useMCTS: USE_MCTS_AI);
     _nameController.text = playerName;
     networkClient = NetworkClient(
       onRoomCode: (code) => _safeSetState(() {
         roomCode = code;
         networkOverlayMessage = 'Waiting for opponent...';
+        _markOverlayDirty();
       }),
       onOpponent: (name) => _handleOpponentReady(name),
       onGameEvent: _handleRemoteEvent,
       onPing: (ms) => _safeSetState(() => pingMs = ms),
       onError: _showError,
       onDisconnected: _handleDisconnect,
-      onStatus: (message) => _safeSetState(() => networkOverlayMessage = message),
+      onStatus: (message) => _safeSetState(() {
+        networkOverlayMessage = message;
+        _markOverlayDirty();
+      }),
     );
     _loadPrefs();
   }
@@ -1209,7 +1396,7 @@ class _MorrisHomeState extends State<MorrisHome> with SingleTickerProviderStateM
     _roomCodeController.dispose();
     _namePromptController.dispose();
     _loaderController.dispose();
-    _stopConfetti(silent: true);
+    _confettiAnimation.dispose();
     networkClient.disconnect();
     super.dispose();
   }
@@ -1259,7 +1446,11 @@ class _MorrisHomeState extends State<MorrisHome> with SingleTickerProviderStateM
     }
 
     engine = GameEngine(mode: mode);
-    ai = type == GameType.ai ? MinimaxAI(difficulty: difficulty) : null;
+    ai = type == GameType.ai ? MinimaxAI(
+      difficulty: difficulty, 
+      useMCTS: USE_MCTS_AI,
+      onStatusUpdate: (msg) => _safeSetState(() => status = msg),
+    ) : null;
     isRemoving = false;
     selectedPiece = null;
     aiThinking = false;
@@ -1277,6 +1468,7 @@ class _MorrisHomeState extends State<MorrisHome> with SingleTickerProviderStateM
       status = type == GameType.human ? 'Player 1 turn' : 'Your turn';
     }
     setState(() {});
+    _markOverlayDirty();
     _savePrefs();
   }
 
@@ -1295,6 +1487,7 @@ class _MorrisHomeState extends State<MorrisHome> with SingleTickerProviderStateM
       selectedPiece = null;
       millHighlight.clear();
     });
+    _markOverlayDirty();
   }
 
   void _handleRemoteEvent(RemoteEvent event) {
@@ -1307,9 +1500,11 @@ class _MorrisHomeState extends State<MorrisHome> with SingleTickerProviderStateM
           final from = (payload['from'] as num?)?.toInt();
           setState(() {
             _applyMove(Move(from: from, to: to), fromRemote: true);
-            currentPlayer = localPlayerId;
-            isMyTurn = true;
-            status = 'Your turn';
+            if (engine.phase != GamePhase.gameOver && !isRemoving) {
+              currentPlayer = localPlayerId;
+              isMyTurn = true;
+              status = 'Your turn';
+            }
           });
         }
         break;
@@ -1352,8 +1547,9 @@ class _MorrisHomeState extends State<MorrisHome> with SingleTickerProviderStateM
       connecting = false;
       networkOverlayMessage = null;
       engine = GameEngine(mode: mode);
-      ai = MinimaxAI(difficulty: difficulty);
+      ai = MinimaxAI(difficulty: difficulty, useMCTS: USE_MCTS_AI);
     });
+    _markOverlayDirty();
   }
 
   void _showError(String message) {
@@ -1366,6 +1562,7 @@ class _MorrisHomeState extends State<MorrisHome> with SingleTickerProviderStateM
         type = type == GameType.network ? GameType.ai : type;
       }
     });
+    _markOverlayDirty();
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 
@@ -1391,12 +1588,14 @@ class _MorrisHomeState extends State<MorrisHome> with SingleTickerProviderStateM
       roomCode = null;
     });
     _savePrefs();
+    _markOverlayDirty();
     try {
       await networkClient.host(playerName);
     } catch (e) {
       _showError('Network error: $e');
     } finally {
       if (mounted) setState(() => connecting = false);
+      _markOverlayDirty();
     }
   }
 
@@ -1424,12 +1623,14 @@ class _MorrisHomeState extends State<MorrisHome> with SingleTickerProviderStateM
       roomCode = code;
     });
     _savePrefs();
+    _markOverlayDirty();
     try {
       await networkClient.join(playerName, code);
     } catch (e) {
       _showError('Network error: $e');
     } finally {
       if (mounted) setState(() => connecting = false);
+      _markOverlayDirty();
     }
   }
 
@@ -1512,16 +1713,23 @@ class _MorrisHomeState extends State<MorrisHome> with SingleTickerProviderStateM
     }
 
     if (mode == GameMode.simple) {
-      if (result.formedMill) {
-        _endGame(currentPlayer);
-        return;
+      void updateState() {
+        if (result.formedMill) {
+          _endGame(currentPlayer);
+        } else if (result.gameOverWinner != null) {
+          _endGame(result.gameOverWinner!);
+        } else {
+          _switchPlayer();
+        }
       }
-      if (result.gameOverWinner != null) {
-        _endGame(result.gameOverWinner!);
-        return;
+
+      if (fromRemote) {
+        updateState();
+      } else {
+        setState(updateState);
       }
-      _switchPlayer();
-      if (type == GameType.ai && currentPlayer == 2) {
+
+      if (!result.formedMill && result.gameOverWinner == null && type == GameType.ai && currentPlayer == 2) {
         _runAIMove();
       }
       return;
@@ -1607,34 +1815,43 @@ class _MorrisHomeState extends State<MorrisHome> with SingleTickerProviderStateM
 
   Future<void> _runAIMove() async {
     _setAIThinking(true);
-    await Future.delayed(const Duration(milliseconds: 250));
-    final move = await ai?.chooseMove(engine, player: 2);
-    _setAIThinking(false);
+    try {
+      await Future.delayed(const Duration(milliseconds: 250));
+      final move = await ai?.chooseMove(engine, player: 2);
 
-    if (move == null || move.to == null) {
-      _endGame(1);
-      return;
-    }
-    final result = engine.applyMove(move, 2);
-    millHighlight.clear();
-    if (result.formedMill && move.to != null) {
-      final pattern = engine.mills.firstWhere((m) => m.contains(move.to) && m.every((p) => engine.board[p] == 2), orElse: () => []);
-      millHighlight = pattern.toSet();
-    }
-    if (result.formedMill) {
-      final removable = move.remove ?? engine.firstRemovable(1);
-      if (removable != null) {
-        engine.removePiece(removable, 1);
+      if (move == null || move.to == null) {
+        setState(() => _endGame(1));
+        return;
       }
-    }
-    final winner = result.gameOverWinner ?? engine.checkWinner();
-    setState(() {
-      currentPlayer = 1;
-      status = 'Your turn';
-      if (winner != null) {
-        _endGame(winner);
+      final result = engine.applyMove(move, 2);
+      millHighlight.clear();
+      if (result.formedMill && move.to != null) {
+        final pattern = engine.mills.firstWhere((m) => m.contains(move.to) && m.every((p) => engine.board[p] == 2), orElse: () => []);
+        millHighlight = pattern.toSet();
       }
-    });
+      if (result.formedMill) {
+        final removable = move.remove ?? engine.firstRemovable(1);
+        if (removable != null) {
+          engine.removePiece(removable, 1);
+        }
+      }
+      final winner = result.gameOverWinner ?? engine.checkWinner();
+      setState(() {
+        currentPlayer = 1;
+        status = 'Your turn';
+        if (winner != null) {
+          _endGame(winner);
+        }
+      });
+    } catch (e, st) {
+      debugPrint('AI move failed: $e\n$st');
+      _showError('AI move failed. Ending the game.');
+      if (mounted) {
+        setState(() => _endGame(1));
+      }
+    } finally {
+      _setAIThinking(false);
+    }
   }
 
   Color _pieceColor(int value) {
@@ -1647,7 +1864,6 @@ class _MorrisHomeState extends State<MorrisHome> with SingleTickerProviderStateM
   Widget build(BuildContext context) {
     final topActive = currentPlayer == _remotePlayer;
     final bottomActive = currentPlayer == localPlayerId;
-    _scheduleOverlayUpdate();
     return Scaffold(
       body: SafeArea(
         child: Stack(
@@ -1668,26 +1884,12 @@ class _MorrisHomeState extends State<MorrisHome> with SingleTickerProviderStateM
                     subtitle: networkConnected ? '${engine.piecesLeft[2]} pieces left | ${opponentName.isEmpty ? "Opponent" : opponentName}' : '${engine.piecesLeft[2]} pieces left',
                     alignTop: true,
                     isActive: topActive,
-                    trailing: type == GameType.ai && aiThinking ? [_aiIndicator()] : const [],
+                    trailing: [
+                      if (type == GameType.ai && aiThinking) _aiIndicator(),
+                      if (type == GameType.network) _networkInfoBadge(),
+                    ],
                   ),
                 ),
-                if (type == GameType.network)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(roomCode != null ? 'Room: $roomCode' : networkOverlayMessage ?? 'Connecting...', style: const TextStyle(fontSize: 13)),
-                        Row(
-                          children: [
-                            const Icon(Icons.network_ping, size: 16),
-                            const SizedBox(width: 4),
-                            Text('${pingMs}ms', style: const TextStyle(fontSize: 13)),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
                 if (showUpdateBanner)
                   Container(
                     margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
@@ -1712,81 +1914,85 @@ class _MorrisHomeState extends State<MorrisHome> with SingleTickerProviderStateM
                     child: Center(
                       child: AspectRatio(
                         aspectRatio: 1,
-                    child: LayoutBuilder(
-                      builder: (context, constraints) {
-                        final size = constraints.biggest;
-                        final theme = Theme.of(context);
-                        final emptyColor = theme.colorScheme.onSurface.withValues(alpha: 0.18);
-                        final lineColor = theme.colorScheme.outline.withValues(alpha: 0.6);
-                        return Stack(
-                          clipBehavior: Clip.none,
-                          children: [
-                            CustomPaint(
-                              size: size,
-                              painter: BoardPainter(lineColor: lineColor),
-                            ),
-                                ...List.generate(engine.positions.length, (i) {
-                                  final pos = engine.positions[i];
-                                  final removable = isRemoving &&
-                                      engine.board[i] == engine.opponent(currentPlayer) &&
-                                      engine.isRemovable(i, engine.opponent(currentPlayer));
-                                  final pieceColor = _pieceColor(engine.board[i]);
-                                  final isEmpty = engine.board[i] == 0;
-                                  final highlightMill = millHighlight.contains(i);
-                                  final isSelected = selectedPiece == i;
-                                  final borderColor = highlightMill
-                                      ? Colors.orange
-                                      : isSelected
-                                          ? Colors.black54
-                                          : (removable ? Colors.redAccent : Colors.transparent);
-                                  final borderWidth = highlightMill
-                                      ? 3.0
-                                      : (isSelected || removable ? 2.2 : 0.0);
-                                  final scale = highlightMill
-                                      ? 1.15
-                                      : isSelected
-                                          ? 1.08
-                                          : removable
-                                              ? 1.05
-                                              : 1.0;
-                                  final opacity = isEmpty ? 0.55 : 1.0;
-                                  return AnimatedPositioned(
-                                    key: ValueKey('piece_$i'),
-                                    duration: _pieceAnimDuration,
-                                    curve: Curves.easeOutCubic,
-                                    left: pos.dx * size.width - 16,
-                                    top: pos.dy * size.height - 16,
-                                    child: GestureDetector(
-                                      onTap: () => handleTap(i),
-                                      child: AnimatedScale(
-                                        duration: _pieceAnimDuration,
-                                        curve: Curves.easeOutBack,
-                                        scale: scale,
-                                        child: AnimatedOpacity(
-                                          duration: _pieceAnimDuration,
-                                          opacity: opacity,
-                                          child: AnimatedContainer(
+                        child: RepaintBoundary(
+                          child: LayoutBuilder(
+                            builder: (context, constraints) {
+                              final size = constraints.biggest;
+                              final theme = Theme.of(context);
+                              final emptyColor = theme.colorScheme.onSurface.withValues(alpha: 0.18);
+                              final lineColor = theme.colorScheme.outline.withValues(alpha: 0.6);
+                              return Stack(
+                                clipBehavior: Clip.none,
+                                children: [
+                                  CustomPaint(
+                                    size: size,
+                                    painter: BoardPainter(lineColor: lineColor),
+                                  ),
+                                  ...List.generate(engine.positions.length, (i) {
+                                    final pos = engine.positions[i];
+                                    final removable = isRemoving &&
+                                        engine.board[i] == engine.opponent(currentPlayer) &&
+                                        engine.isRemovable(i, engine.opponent(currentPlayer));
+                                    final pieceColor = _pieceColor(engine.board[i]);
+                                    final isEmpty = engine.board[i] == 0;
+                                    final highlightMill = millHighlight.contains(i);
+                                    final isSelected = selectedPiece == i;
+                                    final borderColor = highlightMill
+                                        ? Colors.orange
+                                        : isSelected
+                                            ? Colors.black54
+                                            : (removable ? Colors.redAccent : Colors.transparent);
+                                    final borderWidth = highlightMill
+                                        ? 3.0
+                                        : (isSelected || removable ? 2.2 : 0.0);
+                                    final scale = highlightMill
+                                        ? 1.15
+                                        : isSelected
+                                            ? 1.08
+                                            : removable
+                                                ? 1.05
+                                                : 1.0;
+                                    final opacity = isEmpty ? 0.55 : 1.0;
+                                    return AnimatedPositioned(
+                                      key: ValueKey('piece_$i'),
+                                      duration: _pieceAnimDuration,
+                                      curve: Curves.easeOutCubic,
+                                      left: pos.dx * size.width - 16,
+                                      top: pos.dy * size.height - 16,
+                                      child: RepaintBoundary(
+                                        child: GestureDetector(
+                                          onTap: () => handleTap(i),
+                                          child: AnimatedScale(
                                             duration: _pieceAnimDuration,
-                                            curve: Curves.easeOutCubic,
-                                            width: 32,
-                                            height: 32,
-                                            decoration: BoxDecoration(
-                                              color: isEmpty ? emptyColor : pieceColor,
-                                              shape: BoxShape.circle,
-                                              border: Border.all(
-                                                color: borderColor,
-                                                width: borderWidth,
+                                            curve: Curves.easeOutBack,
+                                            scale: scale,
+                                            child: AnimatedOpacity(
+                                              duration: _pieceAnimDuration,
+                                              opacity: opacity,
+                                              child: AnimatedContainer(
+                                                duration: _pieceAnimDuration,
+                                                curve: Curves.easeOutCubic,
+                                                width: 32,
+                                                height: 32,
+                                                decoration: BoxDecoration(
+                                                  color: isEmpty ? emptyColor : pieceColor,
+                                                  shape: BoxShape.circle,
+                                                  border: Border.all(
+                                                    color: borderColor,
+                                                    width: borderWidth,
+                                                  ),
+                                                ),
                                               ),
                                             ),
                                           ),
                                         ),
                                       ),
-                                    ),
-                                  );
-                                }),
-                              ],
-                            );
-                          },
+                                    );
+                                  }),
+                                ],
+                              );
+                            },
+                          ),
                         ),
                       ),
                     ),
@@ -1800,12 +2006,14 @@ class _MorrisHomeState extends State<MorrisHome> with SingleTickerProviderStateM
             ),
             if (showConfetti)
               Positioned.fill(
-                child: IgnorePointer(
-                  child: AnimatedOpacity(
-                    duration: const Duration(milliseconds: 200),
-                    opacity: showConfetti ? 1 : 0,
-                    child: CustomPaint(
-                      painter: _ConfettiPainter(confetti: confetti),
+                child: RepaintBoundary(
+                  child: IgnorePointer(
+                    child: AnimatedOpacity(
+                      duration: const Duration(milliseconds: 200),
+                      opacity: showConfetti ? 1 : 0,
+                      child: CustomPaint(
+                        painter: _ConfettiPainter(confetti: confetti),
+                      ),
                     ),
                   ),
                 ),
@@ -1984,6 +2192,37 @@ class _MorrisHomeState extends State<MorrisHome> with SingleTickerProviderStateM
     );
   }
 
+  Widget _networkInfoBadge() {
+    final theme = Theme.of(context);
+    final label = roomCode != null && roomCode!.isNotEmpty
+        ? 'Room ${roomCode!}'
+        : (networkOverlayMessage ?? 'Connecting...');
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHigh,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: theme.colorScheme.outlineVariant),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Text(label, style: theme.textTheme.bodySmall),
+          const SizedBox(height: 4),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.network_ping, size: 14),
+              const SizedBox(width: 4),
+              Text('${pingMs}ms', style: theme.textTheme.bodySmall),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _circleButton({required IconData icon, required Color background, required Color iconColor, required VoidCallback onTap}) {
     return InkWell(
       onTap: onTap,
@@ -2030,7 +2269,7 @@ class _MorrisHomeState extends State<MorrisHome> with SingleTickerProviderStateM
     );
   }
 
-  void _scheduleOverlayUpdate() {
+  void _markOverlayDirty() {
     if (_overlayUpdateScheduled || !mounted) return;
     _overlayUpdateScheduled = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -2076,279 +2315,46 @@ class _MorrisHomeState extends State<MorrisHome> with SingleTickerProviderStateM
   }
 
   void _openSettings() {
-    bool showAboutDebug = false;
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
       builder: (ctx) {
-        final sheetColor = Theme.of(ctx).colorScheme.surface;
-        return StatefulBuilder(
-          builder: (ctx, localSetState) {
-            void refreshSheet() {
-              if (mounted) localSetState(() {});
-            }
-
-            Widget buildMainSettings() {
-              return Column(
-                key: const ValueKey('main-settings'),
-                children: [
-                  _settingsSection(
-                    ctx,
-                    title: 'Game Type',
-                    child: Wrap(
-                      spacing: 6,
-                      runSpacing: 6,
-                      children: GameType.values
-                          .map((t) => ChoiceChip(
-                                label: Text(t.label),
-                                selected: type == t,
-                                onSelected: (_) {
-                                  _resetState(newType: t, preserveConnection: true);
-                                  refreshSheet();
-                                },
-                              ))
-                          .toList(),
-                    ),
-                  ),
-                  if (type == GameType.ai)
-                    _settingsSection(
-                      ctx,
-                      title: 'AI Difficulty',
-                      child: Wrap(
-                        spacing: 6,
-                        runSpacing: 6,
-                        children: Difficulty.values
-                            .map((d) => ChoiceChip(
-                                  label: Text(d.label),
-                                  selected: difficulty == d,
-                                  onSelected: (_) {
-                                    _resetState(newDifficulty: d);
-                                    refreshSheet();
-                                  },
-                                ))
-                            .toList(),
-                      ),
-                    ),
-                  _settingsSection(
-                    ctx,
-                    title: 'Game Mode',
-                    child: Wrap(
-                      spacing: 6,
-                      runSpacing: 6,
-                      children: GameMode.values
-                          .map((m) => ChoiceChip(
-                                label: Text(m.label),
-                                selected: mode == m,
-                                onSelected: (_) {
-                                  _resetState(newMode: m, preserveConnection: true);
-                                  refreshSheet();
-                                },
-                              ))
-                          .toList(),
-                    ),
-                  ),
-                  _settingsSection(
-                    ctx,
-                    title: 'Player & Theme',
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        TextField(
-                          controller: _nameController,
-                          decoration: const InputDecoration(labelText: 'Your name'),
-                        ),
-                        const SizedBox(height: 6),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            const Text('Dark mode'),
-                            Switch(
-                              value: darkMode,
-                              onChanged: (v) {
-                                setState(() => darkMode = v);
-                                widget.onThemeChanged(v);
-                                _savePrefs();
-                                refreshSheet();
-                              },
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                  if (type == GameType.network)
-                    _settingsSection(
-                      ctx,
-                      title: 'Network',
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Expanded(
-                                child: TextField(
-                                  controller: _roomCodeController,
-                                  textCapitalization: TextCapitalization.characters,
-                                  maxLength: 4,
-                                  decoration: const InputDecoration(labelText: 'Room code', counterText: ''),
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              ElevatedButton.icon(
-                                onPressed: connecting
-                                    ? null
-                                    : () {
-                                        _joinGame();
-                                        refreshSheet();
-                                      },
-                                icon: const Icon(Icons.login),
-                                label: const Text('Join'),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 6),
-                          Row(
-                            children: [
-                              ElevatedButton.icon(
-                                onPressed: connecting
-                                    ? null
-                                    : () {
-                                        _hostGame();
-                                        refreshSheet();
-                                      },
-                                icon: const Icon(Icons.podcasts),
-                                label: const Text('Host'),
-                              ),
-                              const SizedBox(width: 10),
-                              Text(roomCode != null ? 'Room: $roomCode' : ''),
-                            ],
-                          ),
-                          if (networkConnected)
-                            Align(
-                              alignment: Alignment.centerLeft,
-                              child: TextButton.icon(
-                                onPressed: () {
-                                  _leaveNetwork();
-                                  refreshSheet();
-                                },
-                                icon: const Icon(Icons.logout),
-                                label: const Text('Leave network'),
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-                  _settingsSection(
-                    ctx,
-                    title: 'More',
-                    child: ListTile(
-                      contentPadding: const EdgeInsets.symmetric(vertical: 2),
-                      dense: true,
-                      visualDensity: const VisualDensity(horizontal: 0, vertical: -2),
-                      title: const Text('About & Debug'),
-                      trailing: const Icon(Icons.chevron_right),
-                      onTap: () => localSetState(() => showAboutDebug = true),
-                    ),
-                  ),
-                ],
-              );
-            }
-
-            Widget buildAboutContent() {
-              return Column(
-                key: const ValueKey('about-settings'),
-                children: [
-                  _settingsSection(
-                    ctx,
-                    title: 'About & Debug',
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                          decoration: BoxDecoration(
-                            color: Theme.of(ctx).colorScheme.surfaceContainerHigh,
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: Text(_debugText(), style: Theme.of(ctx).textTheme.bodySmall),
-                        ),
-                        const SizedBox(height: 6),
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 6,
-                          children: [
-                            ElevatedButton.icon(
-                              onPressed: () => Clipboard.setData(ClipboardData(text: _debugText())),
-                              icon: const Icon(Icons.copy),
-                              label: const Text('Copy debug'),
-                            ),
-                            ElevatedButton.icon(
-                              onPressed: () {
-                                setState(() => showUpdateBanner = true);
-                                refreshSheet();
-                              },
-                              icon: const Icon(Icons.system_update),
-                              label: const Text('Show update'),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              );
-            }
-
-            return Container(
-              color: sheetColor,
-              padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  return ConstrainedBox(
-                    constraints: BoxConstraints(maxHeight: MediaQuery.of(ctx).size.height * 0.9),
-                    child: ListView(
-                      padding: EdgeInsets.symmetric(horizontal: 12, vertical: showAboutDebug ? 4 : 6),
-                      shrinkWrap: true,
-                      children: [
-                        Row(
-                          children: [
-                            if (showAboutDebug)
-                              IconButton(
-                                onPressed: () => localSetState(() => showAboutDebug = false),
-                                icon: const Icon(Icons.arrow_back),
-                              ),
-                            Expanded(
-                              child: Text(
-                                showAboutDebug ? 'About & Debug' : 'Settings',
-                                style: Theme.of(ctx).textTheme.titleLarge,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        AnimatedSwitcher(
-                          duration: const Duration(milliseconds: 250),
-                          switchInCurve: Curves.easeOutCubic,
-                          switchOutCurve: Curves.easeInCubic,
-                          transitionBuilder: (child, animation) {
-                            final offsetAnimation = Tween<Offset>(begin: const Offset(0.05, 0), end: Offset.zero).animate(animation);
-                            return FadeTransition(
-                              opacity: animation,
-                              child: SlideTransition(position: offsetAnimation, child: child),
-                            );
-                          },
-                          child: showAboutDebug ? buildAboutContent() : buildMainSettings(),
-                        ),
-                      ],
-                    ),
-                  );
-                },
-              ),
-            );
+        return _SettingsSheet(
+          type: type,
+          difficulty: difficulty,
+          mode: mode,
+          darkMode: darkMode,
+          playerName: playerName,
+          networkRole: networkRole,
+          networkConnected: networkConnected,
+          roomCode: roomCode,
+          connecting: connecting,
+          networkOverlayMessage: networkOverlayMessage,
+          pingMs: pingMs,
+          nameController: _nameController,
+          roomCodeController: _roomCodeController,
+          onTypeChanged: (newType) {
+            _resetState(newType: newType, preserveConnection: true);
           },
+          onDifficultyChanged: (newDiff) {
+            _resetState(newDifficulty: newDiff);
+          },
+          onModeChanged: (newMode) {
+            _resetState(newMode: newMode, preserveConnection: true);
+          },
+          onThemeChanged: (v) {
+            setState(() => darkMode = v);
+            widget.onThemeChanged(v);
+            _savePrefs();
+          },
+          onJoin: _joinGame,
+          onHost: _hostGame,
+          onLeave: _leaveNetwork,
+          onShowUpdate: () {
+            setState(() => showUpdateBanner = true);
+          },
+          getDebugText: _debugText,
         );
       },
     );
@@ -2441,7 +2447,9 @@ class _MorrisHomeState extends State<MorrisHome> with SingleTickerProviderStateM
 
   void _triggerConfetti({Color startColor = Colors.blueAccent, Color endColor = Colors.pinkAccent}) {
     final rand = Random();
-    final burst = List.generate(80, (_) {
+    // Reduce particle count for web performance
+    final particleCount = kIsWeb ? 50 : 80;
+    final burst = List.generate(particleCount, (_) {
       final startX = rand.nextDouble();
       final vel = Offset((rand.nextDouble() - 0.5) * 0.02, rand.nextDouble() * 0.02 + 0.01);
       return _ConfettiParticle(
@@ -2457,30 +2465,12 @@ class _MorrisHomeState extends State<MorrisHome> with SingleTickerProviderStateM
       confetti = burst;
       showConfetti = true;
     });
-    _confettiTimer?.cancel();
-    _confettiTicker?.cancel();
-    _confettiTicker = Timer.periodic(const Duration(milliseconds: 16), (_) {
-      if (!mounted) return;
-      setState(() {
-        for (final p in confetti) {
-          p.position += p.velocity;
-          p.velocity += const Offset(0, 0.0008);
-          p.life -= 0.016;
-        }
-        confetti.removeWhere((p) => p.life <= 0);
-        if (confetti.isEmpty) {
-          _stopConfetti();
-        }
-      });
-    });
-    _confettiTimer = Timer(const Duration(seconds: 3), _stopConfetti);
+    _confettiAnimation.reset();
+    _confettiAnimation.repeat();
   }
 
   void _stopConfetti({bool silent = false}) {
-    _confettiTimer?.cancel();
-    _confettiTicker?.cancel();
-    _confettiTimer = null;
-    _confettiTicker = null;
+    _confettiAnimation.stop();
     if (!silent && mounted) {
       setState(() {
         showConfetti = false;
@@ -2569,7 +2559,7 @@ class BoardPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+  bool shouldRepaint(covariant BoardPainter oldDelegate) => lineColor != oldDelegate.lineColor;
 }
 
 class _BorderLoaderPainter extends CustomPainter {
@@ -2635,5 +2625,363 @@ class _ConfettiPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _ConfettiPainter oldDelegate) => true; // list mutated in place
+  bool shouldRepaint(covariant _ConfettiPainter oldDelegate) => confetti.isNotEmpty; // Only repaint if there are particles
+}
+
+class _SettingsSection extends StatelessWidget {
+  final String title;
+  final Widget child;
+  final EdgeInsetsGeometry contentPadding;
+
+  const _SettingsSection({
+    required this.title,
+    required this.child,
+    this.contentPadding = const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title, style: theme.textTheme.labelSmall),
+          const SizedBox(height: 6),
+          RepaintBoundary(
+            child: Container(
+              width: double.infinity,
+              padding: contentPadding,
+              decoration: BoxDecoration(
+                color: theme.colorScheme.surfaceContainerHigh,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: theme.colorScheme.outlineVariant),
+              ),
+              child: child,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SettingsSheet extends StatefulWidget {
+  final GameType type;
+  final Difficulty difficulty;
+  final GameMode mode;
+  final bool darkMode;
+  final String playerName;
+  final NetworkRole networkRole;
+  final bool networkConnected;
+  final String? roomCode;
+  final bool connecting;
+  final String? networkOverlayMessage;
+  final int pingMs;
+  final TextEditingController nameController;
+  final TextEditingController roomCodeController;
+  final ValueChanged<GameType> onTypeChanged;
+  final ValueChanged<Difficulty> onDifficultyChanged;
+  final ValueChanged<GameMode> onModeChanged;
+  final ValueChanged<bool> onThemeChanged;
+  final VoidCallback onJoin;
+  final VoidCallback onHost;
+  final VoidCallback onLeave;
+  final VoidCallback onShowUpdate;
+  final String Function() getDebugText;
+
+  const _SettingsSheet({
+    required this.type,
+    required this.difficulty,
+    required this.mode,
+    required this.darkMode,
+    required this.playerName,
+    required this.networkRole,
+    required this.networkConnected,
+    required this.roomCode,
+    required this.connecting,
+    required this.networkOverlayMessage,
+    required this.pingMs,
+    required this.nameController,
+    required this.roomCodeController,
+    required this.onTypeChanged,
+    required this.onDifficultyChanged,
+    required this.onModeChanged,
+    required this.onThemeChanged,
+    required this.onJoin,
+    required this.onHost,
+    required this.onLeave,
+    required this.onShowUpdate,
+    required this.getDebugText,
+  });
+
+  @override
+  State<_SettingsSheet> createState() => _SettingsSheetState();
+}
+
+class _SettingsSheetState extends State<_SettingsSheet> {
+  bool showAboutDebug = false;
+  late GameType _type;
+  late GameMode _mode;
+  late Difficulty _difficulty;
+
+  @override
+  void initState() {
+    super.initState();
+    _type = widget.type;
+    _mode = widget.mode;
+    _difficulty = widget.difficulty;
+  }
+
+  @override
+  void didUpdateWidget(covariant _SettingsSheet oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.type != widget.type) _type = widget.type;
+    if (oldWidget.mode != widget.mode) _mode = widget.mode;
+    if (oldWidget.difficulty != widget.difficulty) _difficulty = widget.difficulty;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final sheetColor = theme.colorScheme.surface;
+    
+    return Container(
+      color: sheetColor,
+      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          return ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.9),
+            child: RepaintBoundary(
+              child: ListView(
+                padding: EdgeInsets.symmetric(horizontal: 12, vertical: showAboutDebug ? 4 : 6),
+                shrinkWrap: true,
+                children: [
+                  Row(
+                    children: [
+                      if (showAboutDebug)
+                        IconButton(
+                          onPressed: () => setState(() => showAboutDebug = false),
+                          icon: const Icon(Icons.arrow_back),
+                        ),
+                      Expanded(
+                        child: Text(
+                          showAboutDebug ? 'About & Debug' : 'Settings',
+                          style: theme.textTheme.titleLarge,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 250),
+                    switchInCurve: Curves.easeOutCubic,
+                    switchOutCurve: Curves.easeInCubic,
+                    transitionBuilder: (child, animation) {
+                      final offsetAnimation = Tween<Offset>(begin: const Offset(0.05, 0), end: Offset.zero).animate(animation);
+                      return FadeTransition(
+                        opacity: animation,
+                        child: SlideTransition(position: offsetAnimation, child: child),
+                      );
+                    },
+                    child: showAboutDebug ? _buildAboutContent(context) : _buildMainSettings(context),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildMainSettings(BuildContext context) {
+    return Column(
+      key: const ValueKey('main-settings'),
+      children: [
+        _SettingsSection(
+          title: 'Game Type',
+          child: Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: GameType.values
+                .map((t) => ChoiceChip(
+                      label: Text(t.label),
+                      selected: _type == t,
+                      onSelected: (_) {
+                        setState(() => _type = t);
+                        widget.onTypeChanged(t);
+                      },
+                    ))
+                .toList(),
+          ),
+        ),
+        if (_type == GameType.ai)
+          _SettingsSection(
+            title: 'AI Difficulty',
+            child: Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: Difficulty.values
+                  .map((d) => ChoiceChip(
+                        label: Text(d.label),
+                        selected: _difficulty == d,
+                        onSelected: (_) {
+                          setState(() => _difficulty = d);
+                          widget.onDifficultyChanged(d);
+                        },
+                      ))
+                  .toList(),
+            ),
+          ),
+        _SettingsSection(
+          title: 'Game Mode',
+          child: Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: GameMode.values
+                .map((m) => ChoiceChip(
+                      label: Text(m.label),
+                      selected: _mode == m,
+                      onSelected: (_) {
+                        setState(() => _mode = m);
+                        widget.onModeChanged(m);
+                      },
+                    ))
+                .toList(),
+          ),
+        ),
+        _SettingsSection(
+          title: 'Player & Theme',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              TextField(
+                key: const ValueKey('name-field'),
+                controller: widget.nameController,
+                decoration: const InputDecoration(labelText: 'Your name'),
+              ),
+              const SizedBox(height: 6),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text('Dark mode'),
+                  Switch(
+                    value: widget.darkMode,
+                    onChanged: widget.onThemeChanged,
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        if (_type == GameType.network)
+          _SettingsSection(
+            title: 'Network',
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        key: const ValueKey('room-code-field'),
+                        controller: widget.roomCodeController,
+                        textCapitalization: TextCapitalization.characters,
+                        maxLength: 4,
+                        decoration: const InputDecoration(labelText: 'Room code', counterText: ''),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    ElevatedButton.icon(
+                      onPressed: widget.connecting ? null : widget.onJoin,
+                      icon: const Icon(Icons.login),
+                      label: const Text('Join'),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Row(
+                  children: [
+                    ElevatedButton.icon(
+                      onPressed: widget.connecting ? null : widget.onHost,
+                      icon: const Icon(Icons.podcasts),
+                      label: const Text('Host'),
+                    ),
+                    const SizedBox(width: 10),
+                    Text(widget.roomCode != null ? 'Room: ${widget.roomCode}' : ''),
+                  ],
+                ),
+                if (widget.networkConnected)
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      onPressed: widget.onLeave,
+                      icon: const Icon(Icons.logout),
+                      label: const Text('Leave network'),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        _SettingsSection(
+          title: 'More',
+          child: ListTile(
+            contentPadding: const EdgeInsets.symmetric(vertical: 2),
+            dense: true,
+            visualDensity: const VisualDensity(horizontal: 0, vertical: -2),
+            title: const Text('About & Debug'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => setState(() => showAboutDebug = true),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildAboutContent(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      key: const ValueKey('about-settings'),
+      children: [
+        _SettingsSection(
+          title: 'About & Debug',
+          contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.surfaceContainerHigh,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(widget.getDebugText(), style: theme.textTheme.bodySmall),
+              ),
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 8,
+                runSpacing: 6,
+                children: [
+                  ElevatedButton.icon(
+                    onPressed: () => Clipboard.setData(ClipboardData(text: widget.getDebugText())),
+                    icon: const Icon(Icons.copy),
+                    label: const Text('Copy debug'),
+                  ),
+                  ElevatedButton.icon(
+                    onPressed: widget.onShowUpdate,
+                    icon: const Icon(Icons.system_update),
+                    label: const Text('Show update'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
 }

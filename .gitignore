@@ -28,7 +28,6 @@
 build/
 
 # Generated files
-lib/generated_plugin_registrant.dart
 flutter_export_environment.sh
 
 # Android related
