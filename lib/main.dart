@@ -1260,18 +1260,7 @@ class MinimaxAI {
   }
   
   /// Convert GamePhase to int for MCTS
-  int _getPhase(GamePhase phase) {
-    switch (phase) {
-      case GamePhase.placing:
-        return 0;
-      case GamePhase.moving:
-        return 1;
-      case GamePhase.flying:
-        return 2;
-      case GamePhase.gameOver:
-        return 0; // Should not happen
-    }
-  }
+
 
   extreme_ai.Position _toPosition(List<int> board, int wLeft, int bLeft, int player) {
     int whiteBits = 0, blackBits = 0;
@@ -2261,6 +2250,11 @@ class _MorrisHomeState extends State<MorrisHome> with TickerProviderStateMixin {
                   width: 160,
                   child: LinearProgressIndicator(minHeight: 6),
                 ),
+                const SizedBox(height: 16),
+                TextButton(
+                  onPressed: _leaveNetwork,
+                  child: const Text('Cancel'),
+                ),
               ],
             ),
           ),
@@ -2360,34 +2354,7 @@ class _MorrisHomeState extends State<MorrisHome> with TickerProviderStateMixin {
     );
   }
 
-  Widget _settingsSection(
-    BuildContext ctx, {
-    required String title,
-    required Widget child,
-    EdgeInsetsGeometry contentPadding = const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-  }) {
-    final theme = Theme.of(ctx);
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(title, style: Theme.of(ctx).textTheme.labelSmall),
-          const SizedBox(height: 6),
-          Container(
-            width: double.infinity,
-            padding: contentPadding,
-            decoration: BoxDecoration(
-              color: theme.colorScheme.surfaceContainerHigh,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: theme.colorScheme.outlineVariant),
-            ),
-            child: child,
-          ),
-        ],
-      ),
-    );
-  }
+
 
   Future<void> _promptName() async {
     _namePromptController.text = playerName;
@@ -2469,15 +2436,7 @@ class _MorrisHomeState extends State<MorrisHome> with TickerProviderStateMixin {
     _confettiAnimation.repeat();
   }
 
-  void _stopConfetti({bool silent = false}) {
-    _confettiAnimation.stop();
-    if (!silent && mounted) {
-      setState(() {
-        showConfetti = false;
-        confetti = [];
-      });
-    }
-  }
+
 }
 
 class BoardPainter extends CustomPainter {

@@ -162,7 +162,7 @@ class ParallelMCTS {
       }
 
       // 3. Simulation
-      final movesPlayed = <MCTSMove>[];
+
       // We need to access _simulate, but it's private.
       // Wait, we made helper methods public, but _simulate is still private.
       // We can use reflection or just make it public.

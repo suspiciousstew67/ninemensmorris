@@ -1,7 +1,7 @@
 // Combinatorial indexing for Nine Men's Morris tablebase.
 // Maps board positions to unique integer indices for dense array storage.
 
-import 'dart:math';
+
 
 const int boardSize = 24;
 

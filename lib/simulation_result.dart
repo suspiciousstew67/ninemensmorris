@@ -1,3 +1,5 @@
+import 'mcts_node.dart';
+
 class SimulationResult {
   final double score;
   final List<MCTSMove> movesPlayed;

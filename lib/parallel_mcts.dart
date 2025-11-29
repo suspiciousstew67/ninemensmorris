@@ -69,10 +69,7 @@ class ParallelMCTS {
     // Aggregate results
     final aggregatedVisits = <MCTSMove, int>{};
     final aggregatedScores = <MCTSMove, double>{};
-    var totalIterations = 0;
-
     for (final result in results) {
-      totalIterations += result.iterations;
       
       for (final entry in result.rootVisits.entries) {
         final move = entry.key;
@@ -84,8 +81,7 @@ class ParallelMCTS {
       }
     }
 
-    final elapsed = DateTime.now().difference(startTime).inMilliseconds;
-    // print('[Parallel MCTS] Completed $totalIterations iterations across $numIsolates isolates in ${elapsed}ms');
+
 
     if (aggregatedVisits.isEmpty) return null;
 

@@ -362,7 +362,6 @@ SimpleMove? searchBestMove(SimplePosition root, int maxDepth, int maxNodes, int 
   // Ensure zobrist is initialized
   if (!_zobristInitialized) _initZobrist();
   
-  final start = DateTime.now();
   SimpleMove? bestMove;
   
   // Opening Book / Optimal First Moves
