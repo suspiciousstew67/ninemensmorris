@@ -121,10 +121,10 @@ jobs:
             --window-size 600 400 \
             --icon-size 100 \
             --app-drop-link 450 185 \
-            --hide-extension "nine_mens_morris.app" \
+            --hide-extension "Nine Mens Morris.app" \
             --no-internet-enable \
             "NineMensMorris-macOS.dmg" \
-            "nine_mens_morris.app"
+            "Nine Mens Morris.app"
 
       - name: Upload macOS DMG
         uses: actions/upload-artifact@v4
@@ -162,7 +162,7 @@ jobs:
       - name: Create IPA
         run: |
           mkdir -p build/ios/iphoneos/Payload
-          cp -r build/ios/iphoneos/Runner.app build/ios/iphoneos/Payload/
+          cp -r "build/ios/iphoneos/Nine Mens Morris.app" build/ios/iphoneos/Payload/
           cd build/ios/iphoneos
           zip -r NineMensMorris.ipa Payload
 
