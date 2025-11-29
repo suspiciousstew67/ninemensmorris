@@ -1,16 +1,17 @@
 // Tablebase loader for runtime lookup of endgame positions.
 // Loads binary tablebase files into memory for perfect play.
 
-import 'dart:typed_data';
+// import 'dart:typed_data';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'tablebase_index.dart';
 
 // Result codes (must match generator)
-const int TB_UNKNOWN = 0;
-const int TB_WIN = 1;
-const int TB_LOSS = 2;
-const int TB_DRAW = 3;
+const int tbUnknown = 0;
+const int tbWin = 1;
+const int tbLoss = 2;
+const int tbDraw = 3;
 
 class TablebaseLoader {
   final Map<String, Uint8List> _tables = {};
@@ -26,9 +27,9 @@ class TablebaseLoader {
       _tables['4v3'] = await _loadTable('assets/tablebase/4v3.tb');
       _tables['4v4'] = await _loadTable('assets/tablebase/4v4.tb');
       _loaded = true;
-      print('Tablebase loaded: ${_tables.length} tables');
+      debugPrint('Tablebase loaded: ${_tables.length} tables');
     } catch (e) {
-      print('Warning: Could not load tablebase: $e');
+      debugPrint('Warning: Could not load tablebase: $e');
       // Continue without tablebase
     }
   }
@@ -72,13 +73,13 @@ class TablebaseLoader {
     // Convert to score from white's POV
     if (sideToMove == 0) {
       // White to move
-      if (result == TB_WIN) return 32000;
-      if (result == TB_LOSS) return -32000;
+      if (result == tbWin) return 32000;
+      if (result == tbLoss) return -32000;
       return 0; // DRAW or UNKNOWN
     } else {
       // Black to move
-      if (result == TB_WIN) return -32000; // Black wins = white loses
-      if (result == TB_LOSS) return 32000;  // Black loses = white wins
+      if (result == tbWin) return -32000; // Black wins = white loses
+      if (result == tbLoss) return 32000;  // Black loses = white wins
       return 0;
     }
   }

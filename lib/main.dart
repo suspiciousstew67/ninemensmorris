@@ -78,7 +78,7 @@ enum NetworkRole { none, host, client }
 
 // Configuration: Enable MCTS + Tablebase Hybrid AI
 // Set to true to use Monte Carlo Tree Search with Retrograde Analysis
-const bool USE_MCTS_AI = true; // Change to true to enable MCTS mode
+const bool useMctsAi = true; // Change to true to enable MCTS mode
 
 Future<T> _runCompute<T>(FutureOr<T> Function() action) async {
   // Isolates are unavailable on web; run on main isolate there to avoid runtime errors.
@@ -1357,7 +1357,7 @@ class _MorrisHomeState extends State<MorrisHome> with TickerProviderStateMixin {
       });
     darkMode = widget.darkMode;
     engine = GameEngine(mode: mode);
-    ai = MinimaxAI(difficulty: difficulty, useMCTS: USE_MCTS_AI);
+    ai = MinimaxAI(difficulty: difficulty, useMCTS: useMctsAi);
     _nameController.text = playerName;
     networkClient = NetworkClient(
       onRoomCode: (code) => _safeSetState(() {
@@ -1437,7 +1437,7 @@ class _MorrisHomeState extends State<MorrisHome> with TickerProviderStateMixin {
     engine = GameEngine(mode: mode);
     ai = type == GameType.ai ? MinimaxAI(
       difficulty: difficulty, 
-      useMCTS: USE_MCTS_AI,
+      useMCTS: useMctsAi,
       onStatusUpdate: (msg) => _safeSetState(() => status = msg),
     ) : null;
     isRemoving = false;
@@ -1536,7 +1536,7 @@ class _MorrisHomeState extends State<MorrisHome> with TickerProviderStateMixin {
       connecting = false;
       networkOverlayMessage = null;
       engine = GameEngine(mode: mode);
-      ai = MinimaxAI(difficulty: difficulty, useMCTS: USE_MCTS_AI);
+      ai = MinimaxAI(difficulty: difficulty, useMCTS: useMctsAi);
     });
     _markOverlayDirty();
   }
@@ -2415,7 +2415,7 @@ class _MorrisHomeState extends State<MorrisHome> with TickerProviderStateMixin {
   void _triggerConfetti({Color startColor = Colors.blueAccent, Color endColor = Colors.pinkAccent}) {
     final rand = Random();
     // Reduce particle count for web performance
-    final particleCount = kIsWeb ? 50 : 80;
+    const particleCount = kIsWeb ? 50 : 80;
     final burst = List.generate(particleCount, (_) {
       final startX = rand.nextDouble();
       final vel = Offset((rand.nextDouble() - 0.5) * 0.02, rand.nextDouble() * 0.02 + 0.01);

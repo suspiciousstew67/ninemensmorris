@@ -38,7 +38,7 @@ class ParallelMCTS {
 
   /// Run parallel MCTS search
   Future<MCTSMove?> search(MCTSPosition position) async {
-    final startTime = DateTime.now();
+    // final startTime = DateTime.now();
     
     // Divide iterations among isolates
     // Each isolate gets full time, but iterations are split?
@@ -69,10 +69,10 @@ class ParallelMCTS {
     // Aggregate results
     final aggregatedVisits = <MCTSMove, int>{};
     final aggregatedScores = <MCTSMove, double>{};
-    var totalIterations = 0;
+    // var totalIterations = 0;
 
     for (final result in results) {
-      totalIterations += result.iterations;
+      // totalIterations += result.iterations;
       
       for (final entry in result.rootVisits.entries) {
         final move = entry.key;
@@ -84,8 +84,8 @@ class ParallelMCTS {
       }
     }
 
-    final elapsed = DateTime.now().difference(startTime).inMilliseconds;
-    print('[Parallel MCTS] Completed $totalIterations iterations across $numIsolates isolates in ${elapsed}ms');
+    // final elapsed = DateTime.now().difference(startTime).inMilliseconds;
+    // debugPrint('[Parallel MCTS] Completed $totalIterations iterations across $numIsolates isolates in ${elapsed}ms');
 
     if (aggregatedVisits.isEmpty) return null;
 
@@ -100,8 +100,8 @@ class ParallelMCTS {
       }
     }
     
-    final winRate = aggregatedScores[bestMove]! / maxVisits;
-    print('[Parallel MCTS] Best move: $bestMove (visits: $maxVisits, winRate: ${(winRate * 100).toStringAsFixed(1)}%)');
+    // final winRate = aggregatedScores[bestMove]! / maxVisits;
+    // debugPrint('[Parallel MCTS] Best move: $bestMove (visits: $maxVisits, winRate: ${(winRate * 100).toStringAsFixed(1)}%)');
 
     return bestMove;
   }

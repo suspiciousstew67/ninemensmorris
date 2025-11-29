@@ -1,6 +1,7 @@
 // Hybrid AI: Combines MCTS for midgame with Retrograde Analysis (Tablebase) for endgame
 // Automatically switches between strategies based on game phase
 
+import 'package:flutter/foundation.dart';
 import 'mcts_ai.dart';
 import 'mcts_node.dart';
 import 'tablebase_loader.dart';
@@ -51,20 +52,20 @@ class HybridAI {
     // Note: Tablebase currently only supports Classic mode (24 points)
     // TODO: Generate tablebase for Simple mode
     if (!config.isSimpleMode && config.useTablebaseInEndgame && _isEndgamePhase(position)) {
-      // print('[Hybrid] Endgame detected - using tablebase');
+      // debugPrint('[Hybrid] Endgame detected - using tablebase');
       final tbMove = _searchWithTablebase(position);
       if (tbMove != null) return tbMove;
       
       // Fallback to MCTS if tablebase fails
-      // print('[Hybrid] Tablebase failed - falling back to MCTS');
+      // debugPrint('[Hybrid] Tablebase failed - falling back to MCTS');
     }
     
     // Use MCTS for midgame/opening
     if (config.useParallel && parallelMCTS != null) {
-      // print('[Hybrid] Using Parallel MCTS search');
+      // debugPrint('[Hybrid] Using Parallel MCTS search');
       return await parallelMCTS!.search(position);
     } else {
-      // print('[Hybrid] Using Single-threaded MCTS search');
+      // debugPrint('[Hybrid] Using Single-threaded MCTS search');
       return mctsEngine.search(position);
     }
   }
@@ -117,7 +118,7 @@ class HybridAI {
     }
     
     if (bestMove != null) {
-      print('[Tablebase] Found move with score $bestScore');
+      debugPrint('[Tablebase] Found move with score $bestScore');
     }
     
     return bestMove;

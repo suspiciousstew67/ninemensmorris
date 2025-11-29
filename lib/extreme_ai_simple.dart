@@ -253,7 +253,7 @@ int evaluate(SimplePosition pos) {
   // Positional bonus (center/intersections)
   // The strongest points are the middle-layer cross points (connected to 4 lines)
   // Indices: 9, 11, 13, 15
-  final intersections = (1<<9) | (1<<11) | (1<<13) | (1<<15);
+  const intersections = (1<<9) | (1<<11) | (1<<13) | (1<<15);
   final wInter = _popcount(wOcc & intersections);
   final bInter = _popcount(bOcc & intersections);
   score += (wInter - bInter) * 400; // Prefer strong anchors aggressively

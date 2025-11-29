@@ -6,10 +6,10 @@ import 'dart:typed_data';
 import 'tablebase_index.dart';
 
 // Result codes
-const int UNKNOWN = 0;
-const int WIN = 1;
-const int LOSS = 2;
-const int DRAW = 3;
+const int tbUnknown = 0;
+const int tbWin = 1;
+const int tbLoss = 2;
+const int tbDraw = 3;
 
 // Mills (same as extreme_ai.dart)
 final List<int> _millMasks = _buildMillMasks();
@@ -145,18 +145,18 @@ int _popcount(int bits) {
 /// Generate tablebase for numWhite vs numBlack
 Uint8List generateTablebase(int numWhite, int numBlack, 
     {Map<String, Uint8List>? lowerTables, bool simpleMode = false}) {
-  print('Generating ${numWhite}v$numBlack tablebase...');
+  stdout.writeln('Generating ${numWhite}v$numBlack tablebase...');
   
   final totalPositions = numPositions(numWhite, numBlack);
-  print('Total positions: $totalPositions');
+  stdout.writeln('Total positions: $totalPositions');
   
   final table = Uint8List(totalPositions);
   
   final isFlying = !simpleMode && numWhite <= 3 && numBlack <= 3;
-  print('Flying phase: $isFlying (simpleMode: $simpleMode)');
+  stdout.writeln('Flying phase: $isFlying (simpleMode: $simpleMode)');
   
   // Step 1: Initialize terminal states
-  print('Initializing terminal states...');
+  stdout.writeln('Initializing terminal states...');
   for (var idx = 0; idx < totalPositions; idx++) {
     final state = deindexPosition(idx, numWhite, numBlack);
     final white = state[0];
@@ -168,7 +168,7 @@ Uint8List generateTablebase(int numWhite, int numBlack,
     
     // Terminal: side to move has <3 pieces (classic)
     if (!simpleMode && ((stm == 0 && wc < 3) || (stm == 1 && bc < 3))) {
-      table[idx] = LOSS;
+      table[idx] = tbLoss;
     }
 
     // Terminal: Simple mode mill present
@@ -180,9 +180,9 @@ Uint8List generateTablebase(int numWhite, int numBlack,
         // If current side already has a mill, they win; otherwise they lose.
         final stmBoard = stm == 0 ? white : black;
         if (_hasAnyMill(stmBoard)) {
-          table[idx] = WIN;
+          table[idx] = tbWin;
         } else if (_hasAnyMill(stm == 0 ? black : white)) {
-          table[idx] = LOSS;
+          table[idx] = tbLoss;
         }
       }
     }
@@ -193,12 +193,12 @@ Uint8List generateTablebase(int numWhite, int numBlack,
     final moves = generateMoves(myBoard, oppBoard, isFlying, simpleMode: simpleMode);
     
     if (moves.isEmpty) {
-      table[idx] = LOSS; // No moves = loss
+      table[idx] = tbLoss; // No moves = loss
     }
   }
   
   // Step 2: Iterative propagation
-  print('Propagating results...');
+  stdout.writeln('Propagating results...');
   var changed = true;
   var iteration = 0;
   
@@ -207,7 +207,7 @@ Uint8List generateTablebase(int numWhite, int numBlack,
     iteration++;
     
     for (var idx = 0; idx < totalPositions; idx++) {
-      if (table[idx] != UNKNOWN) continue;
+      if (table[idx] != tbUnknown) continue;
       
       final state = deindexPosition(idx, numWhite, numBlack);
       final white = state[0];
@@ -236,7 +236,7 @@ Uint8List generateTablebase(int numWhite, int numBlack,
         if (simpleMode && move['remove'] == -1) {
           final formsMill = _formsMill(stm == 0 ? newWhite : newBlack, move['to']!);
           if (formsMill) {
-            result = LOSS; // From opponent POV after the move
+            result = tbLoss; // From opponent POV after the move
           } else {
             final newIdx = indexPosition(newWhite, newBlack, newStm, numWhite, numBlack);
             result = table[newIdx];
@@ -256,46 +256,46 @@ Uint8List generateTablebase(int numWhite, int numBlack,
           result = table[newIdx];
         }
         
-        if (result == LOSS) {
+        if (result == tbLoss) {
           hasWinningMove = true; // Opponent loses = we win
           break;
         }
-        if (result != WIN) {
+        if (result != tbWin) {
           allMovesLose = false;
         }
       }
       
       if (hasWinningMove) {
-        table[idx] = WIN;
+        table[idx] = tbWin;
         changed = true;
       } else if (allMovesLose) {
-        table[idx] = LOSS;
+        table[idx] = tbLoss;
         changed = true;
       }
     }
     
-    final resolved = table.where((x) => x != UNKNOWN).length;
-    print('Iteration $iteration: $resolved/$totalPositions resolved');
+    final resolved = table.where((x) => x != tbUnknown).length;
+    stdout.writeln('Iteration $iteration: $resolved/$totalPositions resolved');
   }
   
   // Step 3: Mark remaining as DRAW
   for (var idx = 0; idx < totalPositions; idx++) {
-    if (table[idx] == UNKNOWN) {
-      table[idx] = DRAW;
+    if (table[idx] == tbUnknown) {
+      table[idx] = tbDraw;
     }
   }
   
-  final wins = table.where((x) => x == WIN).length;
-  final losses = table.where((x) => x == LOSS).length;
-  final draws = table.where((x) => x == DRAW).length;
-  print('Results: $wins wins, $losses losses, $draws draws');
+  final wins = table.where((x) => x == tbWin).length;
+  final losses = table.where((x) => x == tbLoss).length;
+  final draws = table.where((x) => x == tbDraw).length;
+  stdout.writeln('Results: $wins wins, $losses losses, $draws draws');
   
   return table;
 }
 
 void main() async {
-  print('Nine Men\'s Morris Tablebase Generator');
-  print('====================================\n');
+  stdout.writeln('Nine Men\'s Morris Tablebase Generator');
+  stdout.writeln('====================================\n');
 
   // Toggle this to generate Simple mode (placement-only, first mill wins) tables.
   const simpleMode = true;
@@ -309,18 +309,18 @@ void main() async {
   // Generate 3v3
   final tb3v3 = generateTablebase(3, 3, simpleMode: simpleMode);
   await File('assets/tablebase/3v3.tb').writeAsBytes(tb3v3);
-  print('Saved 3v3.tb\n');
+  stdout.writeln('Saved 3v3.tb\n');
   
   // Generate 3v4 and 4v3
   final lowerTables = <String, Uint8List>{'3v3': tb3v3};
   
   final tb3v4 = generateTablebase(3, 4, lowerTables: lowerTables, simpleMode: simpleMode);
   await File('assets/tablebase/3v4.tb').writeAsBytes(tb3v4);
-  print('Saved 3v4.tb\n');
+  stdout.writeln('Saved 3v4.tb\n');
   
   final tb4v3 = generateTablebase(4, 3, lowerTables: lowerTables, simpleMode: simpleMode);
   await File('assets/tablebase/4v3.tb').writeAsBytes(tb4v3);
-  print('Saved 4v3.tb\n');
+  stdout.writeln('Saved 4v3.tb\n');
   
   // Generate 4v4
   lowerTables['3v4'] = tb3v4;
@@ -328,7 +328,7 @@ void main() async {
   
   final tb4v4 = generateTablebase(4, 4, lowerTables: lowerTables, simpleMode: simpleMode);
   await File('assets/tablebase/4v4.tb').writeAsBytes(tb4v4);
-  print('Saved 4v4.tb\n');
+  stdout.writeln('Saved 4v4.tb\n');
   
-  print('Tablebase generation complete!');
+  stdout.writeln('Tablebase generation complete!');
 }

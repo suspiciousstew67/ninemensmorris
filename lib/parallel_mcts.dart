@@ -40,7 +40,7 @@ class ParallelMCTS {
 
   /// Run parallel MCTS search
   Future<MCTSMove?> search(MCTSPosition position) async {
-    final startTime = DateTime.now();
+    // final startTime = DateTime.now();
     
     // Divide iterations among isolates?
     // No, for root parallelization, we run full iterations on each isolate
