@@ -196,8 +196,12 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Build Windows app
+      - name: Build Windows x64 app
         run: flutter build windows --release
+
+      - name: Build Windows ARM64 app
+        run: flutter build windows --release --arch=arm64
+        continue-on-error: true
 
       - name: Install Inno Setup
         run: |
@@ -210,16 +214,23 @@ jobs:
           echo "VERSION=$version" >> $env:GITHUB_ENV
         shell: pwsh
 
-      - name: Create Windows Installer
+      - name: Create Windows x64 Installer
         run: |
-          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" .github\windows-installer.iss
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /dBuildArch=x64 .github\windows-installer.iss
         shell: pwsh
 
-      - name: Upload Windows Installer
+      - name: Create Windows ARM64 Installer
+        run: |
+          if (Test-Path "build\windows\arm64\runner\Release\clean_nine_mens_morris_flutter.exe") {
+            & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /dBuildArch=arm64 .github\windows-installer.iss
+          }
+        shell: pwsh
+
+      - name: Upload Windows Installers
         uses: actions/upload-artifact@v4
         with:
-          name: windows-installer
-          path: .github/NineMensMorris-Setup.exe
+          name: windows-installers
+          path: .github/NineMensMorris-Setup-*.exe
 
   release:
     name: Create GitHub Release
@@ -239,10 +250,10 @@ jobs:
           name: macos-dmg
           path: ./artifacts
 
-      - name: Download Windows Installer
+      - name: Download Windows Installers
         uses: actions/download-artifact@v4
         with:
-          name: windows-installer
+          name: windows-installers
           path: ./artifacts
 
       - name: Download Android APK
@@ -268,7 +279,8 @@ jobs:
         with:
           files: |
             ./artifacts/NineMensMorris-macOS.dmg
-            ./artifacts/NineMensMorris-Setup.exe
+            ./artifacts/NineMensMorris-Setup-x64.exe
+            ./artifacts/NineMensMorris-Setup-arm64.exe
             ./artifacts/app-release.apk
             ./artifacts/app-release.aab
             ./artifacts/NineMensMorris.ipa
