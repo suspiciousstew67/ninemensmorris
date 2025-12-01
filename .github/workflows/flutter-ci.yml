@@ -196,12 +196,8 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Build Windows x64 app
+      - name: Build Windows app
         run: flutter build windows --release
-
-      - name: Build Windows ARM64 app
-        run: flutter build windows --release --arch=arm64
-        continue-on-error: true
 
       - name: Install Inno Setup
         run: |
@@ -214,23 +210,17 @@ jobs:
           echo "VERSION=$version" >> $env:GITHUB_ENV
         shell: pwsh
 
-      - name: Create Windows x64 Installer
+      - name: Create Windows Installer
         run: |
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /dBuildArch=x64 .github\windows-installer.iss
         shell: pwsh
 
-      - name: Create Windows ARM64 Installer
-        run: |
-          if (Test-Path "build\windows\arm64\runner\Release\clean_nine_mens_morris_flutter.exe") {
-            & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /dBuildArch=arm64 .github\windows-installer.iss
-          }
-        shell: pwsh
-
-      - name: Upload Windows Installers
+      - name: Upload Windows Installer
         uses: actions/upload-artifact@v4
         with:
-          name: windows-installers
-          path: .github/NineMensMorris-Setup-*.exe
+          name: windows-installer
+          path: .github/NineMensMorris-Setup-x64.exe
+          if-no-files-found: error
 
   release:
     name: Create GitHub Release
@@ -250,10 +240,10 @@ jobs:
           name: macos-dmg
           path: ./artifacts
 
-      - name: Download Windows Installers
+      - name: Download Windows Installer
         uses: actions/download-artifact@v4
         with:
-          name: windows-installers
+          name: windows-installer
           path: ./artifacts
 
       - name: Download Android APK
@@ -280,7 +270,6 @@ jobs:
           files: |
             ./artifacts/NineMensMorris-macOS.dmg
             ./artifacts/NineMensMorris-Setup-x64.exe
-            ./artifacts/NineMensMorris-Setup-arm64.exe
             ./artifacts/app-release.apk
             ./artifacts/app-release.aab
             ./artifacts/NineMensMorris.ipa
